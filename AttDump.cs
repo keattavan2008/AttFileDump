@@ -22,7 +22,7 @@ namespace AttFileDump
         private bool _useDrawList;
         private bool _exportUnsets = true;
         private bool _exportTube = true;
-        
+
         private readonly HashSet<string> _elementNames = new HashSet<string>();
         private readonly Dictionary<DbElementType, List<DbAttribute>> _attributeCache = new Dictionary<DbElementType, List<DbAttribute>>();
 
@@ -37,7 +37,7 @@ namespace AttFileDump
             _useDrawList = that._useDrawList;
             _exportUnsets = that._exportUnsets;
             _exportTube = that._exportTube;
-            
+
             // Copies the element names if any were added
             _elementNames.Clear();
             foreach (string name in that._elementNames)
@@ -90,7 +90,7 @@ namespace AttFileDump
             else if (_useDrawList)
             {
                 // Compiler Warning Resolution: Execution path defined.
-                // Note: Interrogating the DrawList via pure database extraction requires bridging 
+                // Note: Interrogating the DrawList via pure database extraction requires bridging
                 // Aveva.Core.Presentation, which is typically avoided in batch DB dumps.
                 throw new NotSupportedException("DrawList extraction is routed through the UI namespace.");
             }
@@ -155,11 +155,11 @@ namespace AttFileDump
             string elementName;
             try { elementName = element.GetAsString(DbAttributeInstance.FLNM); }
             catch { elementName = element.ToString(); }
-            
+
             WriteIndentedLine(writer, tab, "NEW " + elementName);
 
             List<DbAttribute> attributes = GetCachedAttributes(element, elementType);
-            
+
             // THE FIX: Replicates PML's !attl.width() by finding the longest attribute name
             int maxNameLength = attributes.Count > 0 ? attributes.Max(a => a.Name.Length) : 0;
             int attrSize = maxNameLength + 3;
@@ -168,8 +168,8 @@ namespace AttFileDump
 
             foreach (DbAttribute attr in attributes)
             {
-                string attrValue; 
-                
+                string attrValue;
+
                 try
                 {
                     attrValue = element.GetAsString(attr);
@@ -192,7 +192,7 @@ namespace AttFileDump
                     sb.Append(' ', iTab);
                     sb.Append(attr.Name.ToUpper());
                     sb.Append(Delimiter);
-                    
+
                     string leftPart = sb.ToString();
                     sb.Clear();
                     // This PadRight will now correctly use the longest name length, not the total count
@@ -224,7 +224,7 @@ namespace AttFileDump
                 // Updated per AVEVA E3D API constraint observation
                 if (attr.Type == DbAttributeType.STRINGARRAY)
                 {
-                    continue; 
+                    continue;
                 }
                 attributes.Add(attr);
             }
@@ -239,7 +239,7 @@ namespace AttFileDump
                     attributes.Add(DbAttribute.GetDbAttribute("DTXR"));
                     attributes.Add(DbAttribute.GetDbAttribute("MTXX"));
                 }
-                
+
                 if (type == DbElementTypeInstance.TUBE)
                 {
                     attributes.Add(DbAttributeInstance.FLNN);
@@ -267,12 +267,12 @@ namespace AttFileDump
             // Fully replicates the native PML header output formatting
             writer.WriteLine($"AVEVA_Attributes_File v1.0 , start: NEW , end: END , name_end: {Delimiter} , sep: {Separator}");
             writer.WriteLine("NEW Header Information");
-            
+
             string date = DateTime.Now.ToString("dd MMM yyyy");
             string time = DateTime.Now.ToString("HH:mm:ss");
-            
+
             writer.WriteLine($"  Source{Delimiter} AVEVA E3D Design Data {Separator} Date{Delimiter} {date} {Separator} Time{Delimiter} {time}");
-            
+
             string mdbName = MDB.CurrentMDB != null ? MDB.CurrentMDB.Name : "UNKNOWN";
             string prjCode = Project.CurrentProject != null ? Project.CurrentProject.Code : "UNKNOWN";
             string ceName = ce.IsValid ? ce.GetAsString(DbAttributeInstance.FLNM) : "UNKNOWN";
@@ -295,19 +295,19 @@ namespace AttFileDump
         private bool ShouldExportAttribute(string attrValue, bool exportUnsets)
         {
             if (exportUnsets) return true;
-            
+
             // Compiler Warning Resolution: Culture-specific IndexOf replaced with OrdinalIgnoreCase
             if (IgnorePattern.IndexOf("," + attrValue + ",", StringComparison.OrdinalIgnoreCase) >= 0) return false;
-            
+
             return true;
         }
-        
+
         [PMLNetCallable()]
         public void SetUseCe(bool use)
         {
             _useCe = use;
             // Smart Toggle: If CE is true, the others should logically be false
-            if (use) 
+            if (use)
             {
                 _useElements = false;
                 _useDrawList = false;
@@ -318,7 +318,7 @@ namespace AttFileDump
         public void SetUseElements(bool use)
         {
             _useElements = use;
-            if (use) 
+            if (use)
             {
                 _useCe = false;
                 _useDrawList = false;
@@ -329,7 +329,7 @@ namespace AttFileDump
         public void SetUseDrawList(bool use)
         {
             _useDrawList = use;
-            if (use) 
+            if (use)
             {
                 _useCe = false;
                 _useElements = false;
@@ -347,7 +347,7 @@ namespace AttFileDump
         {
             _exportTube = export;
         }
-        
+
         // Helper method to add specific elements when _useElements is true
         [PMLNetCallable()]
         public void AddElementToExport(string elementName)
@@ -357,7 +357,7 @@ namespace AttFileDump
                 _elementNames.Add(elementName);
             }
         }
-        
+
         [PMLNetCallable()]
         public void ClearElements()
         {
