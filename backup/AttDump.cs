@@ -16,107 +16,111 @@ namespace AttFileDump
         private const string Separator = "&end&";
         private const string IgnorePattern = ",unset,=0/0,";
 
-        // Parameters
+        // Readonly fields satisfy compiler warnings for single-assignment variables
         private bool _useCe = true;
-        private bool _useElements = false;
-        private bool _useDrawList = false;
+        private bool _useElements;
+        private bool _useDrawList;
         private bool _exportUnsets = true;
         private bool _exportTube = true;
-        private HashSet<string> _elementNames = new HashSet<string>();
+
+        private readonly HashSet<string> _elementNames = new HashSet<string>();
+        private readonly Dictionary<DbElementType, List<DbAttribute>> _attributeCache = new Dictionary<DbElementType, List<DbAttribute>>();
 
         [PMLNetCallable()]
         public AttDump() { }
 
         [PMLNetCallable()]
-        public void Assign(AttDump that) { }
+        public void Assign(AttDump that)
+        {
+            _useCe = that._useCe;
+            _useElements = that._useElements;
+            _useDrawList = that._useDrawList;
+            _exportUnsets = that._exportUnsets;
+            _exportTube = that._exportTube;
+
+            // Copies the element names if any were added
+            _elementNames.Clear();
+            foreach (string name in that._elementNames)
+            {
+                _elementNames.Add(name);
+            }
+        }
 
         [PMLNetCallable()]
         public void GenerateAttFile(string filename)
         {
-            try
+            if (string.IsNullOrEmpty(filename)) throw new ArgumentException("Filename must be supplied.");
+            if (filename.StartsWith("/")) filename = filename.Substring(1);
+
+            HashSet<DbElement> rootElements = new HashSet<DbElement>();
+            DbElement currentCe = CurrentElement.Element;
+
+            // Element Collection logic
+            if (_useCe)
             {
-                if (string.IsNullOrEmpty(filename)) throw new ArgumentException("You must supply a filename");
-                if (filename.StartsWith("/")) filename = filename.Substring(1);
+                if (!currentCe.IsValid) throw new InvalidOperationException("Current Element is not valid.");
 
-                // Use HashSet for instant duplicate checking
-                HashSet<DbElement> rootElements = new HashSet<DbElement>();
-
-                // 1. Gather Root Elements Only (Don't gather children yet)
-                if (_useCe)
+                if (currentCe.GetElementType() == DbElementTypeInstance.WORLD)
                 {
-                    DbElement ce = CurrentElement.Element;
-                    if (!ce.IsValid) throw new InvalidOperationException("Current Element is not valid");
-
-                    // Optimization: If WORLD, just add Sites. Don't scan everything yet.
-                    if (ce.GetElementType() == DbElementTypeInstance.WORLD)
+                    TypeFilter filt = new TypeFilter(DbElementTypeInstance.SITE);
+                    DBElementCollection collection = new DBElementCollection(currentCe, filt);
+                    foreach (DbElement site in collection)
                     {
-                        foreach (DbElement site in new DBElementCollection(ce, new TypeFilter(DbElementTypeInstance.SITE)))
-                        {
-                            rootElements.Add(site);
-                        }
-                    }
-                    else
-                    {
-                        // Add CE
-                        rootElements.Add(ce);
-
-                        // Add implied owners (Zone/Site) if CE is deep in hierarchy
-                        // Note: In a dump, usually you want the hierarchy downwards.
-                        // If you want parents included, add them as roots.
-                        AddParentsToRoots(ce, rootElements);
+                        rootElements.Add(site);
                     }
                 }
-                else if (_useElements && _elementNames != null)
+                else
                 {
-                    foreach (string name in _elementNames)
-                    {
-                        DbElement ele = DbElement.GetElement(name);
-                        if (ele.IsValid)
-                        {
-                            rootElements.Add(ele);
-                            AddParentsToRoots(ele, rootElements);
-                        }
-                    }
+                    rootElements.Add(currentCe);
+                    AddParentsToRoots(currentCe, rootElements);
                 }
-                // (Drawlist logic omitted for brevity, logic remains similar: add roots)
-
-                if (rootElements.Count == 0) throw new InvalidOperationException("No elements found to export");
-
-                // Sort roots to ensure Site -> Zone order if multiple levels exist
-                // We use a custom comparer to ensure we process parents before children if both are in the list
-                var sortedRoots = rootElements.OrderBy(e => GetDepthFromWorld(e)).ToList();
-
-                using (StreamWriter writer = new StreamWriter(filename, false, Encoding.UTF8))
+            }
+            else if (_useElements && _elementNames != null)
+            {
+                foreach (string name in _elementNames)
                 {
-                    // Buffer size optimization can be added to StreamWriter for speed
-                    WriteHeader(writer);
-
-                    // We use a HashSet to ensure we don't process the same element twice
-                    // (e.g. if User selected a Zone AND a Pipe inside that Zone)
-                    HashSet<DbElement> processed = new HashSet<DbElement>();
-
-                    foreach (DbElement root in sortedRoots)
+                    DbElement ele = DbElement.GetElement(name);
+                    if (ele.IsValid)
                     {
-                        // Recursive hierarchy walk
-                        ProcessHierarchy(root, 0, writer, processed);
+                        rootElements.Add(ele);
+                        AddParentsToRoots(ele, rootElements);
                     }
                 }
             }
-            catch (Exception ex)
+            else if (_useDrawList)
             {
-                throw new Exception("Error exporting attributes: " + ex.Message, ex);
+                // Compiler Warning Resolution: Execution path defined.
+                // Note: Interrogating the DrawList via pure database extraction requires bridging
+                // Aveva.Core.Presentation, which is typically avoided in batch DB dumps.
+                throw new NotSupportedException("DrawList extraction is routed through the UI namespace.");
+            }
+
+            if (rootElements.Count == 0) throw new InvalidOperationException("No valid elements found to export.");
+
+            // Compiler Warning Resolution: Converted lambda to Method Group
+            var sortedRoots = rootElements.OrderBy(GetDepthFromWorld).ToList();
+
+            using (StreamWriter writer = new StreamWriter(filename, false, Encoding.UTF8, 131072))
+            {
+                // Pass CE to write the specific element name in the header, mimicking PML
+                WriteHeader(writer, currentCe);
+
+                HashSet<DbElement> processed = new HashSet<DbElement>();
+
+                foreach (DbElement root in sortedRoots)
+                {
+                    ProcessHierarchy(root, 0, writer, processed);
+                }
             }
         }
 
         private void AddParentsToRoots(DbElement ele, HashSet<DbElement> roots)
         {
-            // Logic to grab the Site/Zone owning this element if required
-            // This replicates your GetZone/GetSite logic but cleaner
             DbElement ptr = ele.Owner;
             while (ptr.IsValid && ptr.GetElementType() != DbElementTypeInstance.WORLD)
             {
                 if (ptr.GetElementType() == DbElementTypeInstance.SITE ||
-                   ptr.GetElementType() == DbElementTypeInstance.ZONE)
+                    ptr.GetElementType() == DbElementTypeInstance.ZONE)
                 {
                     roots.Add(ptr);
                 }
@@ -124,76 +128,128 @@ namespace AttFileDump
             }
         }
 
-        // RECURSIVE FUNCTION - Naturally handles hierarchy and indentation
         private void ProcessHierarchy(DbElement element, int currentDepth, StreamWriter writer, HashSet<DbElement> processed)
         {
-            if (processed.Contains(element)) return; // Prevent duplicates
-            processed.Add(element);
+            if (!processed.Add(element)) return;
 
-            // Skip Tube check
-            if (element.GetElementType() == DbElementTypeInstance.TUBE && !_exportTube) return;
+            DbElementType elementType = element.GetElementType();
 
-            // 1. Write the Element
-            WriteElementData(element, currentDepth, writer);
+            if (elementType == DbElementTypeInstance.TUBE && !_exportTube) return;
 
-            // 2. Get Children (Standard collection is usually strictly hierarchy order)
-            // Using DBElementCollection is faster than GetMembers() for large sets
-            DBElementCollection children = new DBElementCollection(element);
+            WriteElementData(element, elementType, currentDepth, writer);
 
+            DbElement[] children = element.Members();
             foreach (DbElement child in children)
             {
                 ProcessHierarchy(child, currentDepth + 1, writer, processed);
             }
 
-            // 3. Write End Tag for this level
             WriteIndentedLine(writer, currentDepth * 2, "END");
         }
 
-        private void WriteElementData(DbElement element, int depth, StreamWriter writer)
+        private void WriteElementData(DbElement element, DbElementType elementType, int depth, StreamWriter writer)
         {
             int tab = depth * 2;
             int iTab = tab + 2;
 
-            try
+            string elementName;
+            try { elementName = element.GetAsString(DbAttributeInstance.FLNM); }
+            catch { elementName = element.ToString(); }
+
+            WriteIndentedLine(writer, tab, "NEW " + elementName);
+
+            List<DbAttribute> attributes = GetCachedAttributes(element, elementType);
+
+            // THE FIX: Replicates PML's !attl.width() by finding the longest attribute name
+            int maxNameLength = attributes.Count > 0 ? attributes.Max(a => a.Name.Length) : 0;
+            int attrSize = maxNameLength + 3;
+
+            StringBuilder sb = new StringBuilder(128);
+
+            foreach (DbAttribute attr in attributes)
             {
-                string elementName = element.GetAsString(DbAttributeInstance.FLNM);
-                WriteIndentedLine(writer, tab, "NEW " + elementName);
+                string attrValue;
 
-                // Get Attributes - We pass the 'element' directly, NO CurrentElement switching!
-                List<DbAttribute> attributes = GetAttributes(element);
-                int attrSize = attributes.Count + 3;
-
-                foreach (DbAttribute attr in attributes)
+                try
                 {
-                    // Optimize: Don't call GetAsString if we know we don't need it?
-                    // Hard to do with generic "AttDump", but we can try-catch safely.
-                    string attrName = attr.Name.ToUpper();
-                    string attrValue = GetAttributeValue(element, attr);
+                    attrValue = element.GetAsString(attr);
+                }
+                catch
+                {
+                    continue;
+                }
 
+                if (string.IsNullOrEmpty(attrValue)) continue;
+
+                if (ShouldExportAttribute(attrValue, _exportUnsets))
+                {
                     attrValue = ProcessAttributeValue(attrValue);
 
-                    if (ShouldExportAttribute(attrValue, _exportUnsets))
-                    {
-                        // Handle PML specific escaping
-                        bool hasDollarUnderscore = attrValue.Contains("$$_");
-                        if (hasDollarUnderscore) attrValue = attrValue.Replace("$$_", "DOLLARU");
+                    bool hasDollarUnderscore = attrValue.Contains("$$_");
+                    if (hasDollarUnderscore) attrValue = attrValue.Replace("$$_", "DOLLARU");
 
-                        string formattedLine = FormatAttributeLine(iTab, attrName, attrValue, attrSize);
+                    sb.Clear();
+                    sb.Append(' ', iTab);
+                    sb.Append(attr.Name.ToUpper());
+                    sb.Append(Delimiter);
 
-                        if (hasDollarUnderscore) formattedLine = formattedLine.Replace("DOLLARU", "$$_");
-                        if (formattedLine.Contains("DOLLARL")) formattedLine = formattedLine.Replace("DOLLARL", "$$L");
+                    string leftPart = sb.ToString();
+                    sb.Clear();
+                    // This PadRight will now correctly use the longest name length, not the total count
+                    sb.Append(leftPart.PadRight(iTab + attrSize + Delimiter.Length + 2));
+                    sb.Append(attrValue);
 
-                        writer.WriteLine(formattedLine);
-                    }
+                    string formattedLine = sb.ToString();
+
+                    if (hasDollarUnderscore) formattedLine = formattedLine.Replace("DOLLARU", "$$_");
+                    if (formattedLine.Contains("DOLLARL")) formattedLine = formattedLine.Replace("DOLLARL", "$$L");
+
+                    writer.WriteLine(formattedLine);
                 }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error processing {element}: {ex.Message}");
             }
         }
 
-        // Helper to get simple depth for sorting roots only
+        private List<DbAttribute> GetCachedAttributes(DbElement element, DbElementType type)
+        {
+            if (_attributeCache.TryGetValue(type, out List<DbAttribute> cachedAttrs))
+            {
+                return cachedAttrs;
+            }
+
+            List<DbAttribute> attributes = new List<DbAttribute>();
+            DbAttribute[] rawAttrs = element.GetAttributes();
+
+            foreach (DbAttribute attr in rawAttrs)
+            {
+                // Updated per AVEVA E3D API constraint observation
+                if (attr.Type == DbAttributeType.STRINGARRAY)
+                {
+                    continue;
+                }
+                attributes.Add(attr);
+            }
+
+            if (type != DbElementTypeInstance.WORLD)
+            {
+                DbElement owner = element.Owner;
+                if (owner.IsValid && owner.GetElementType() == DbElementTypeInstance.BRANCH)
+                {
+                    attributes.Add(DbAttribute.GetDbAttribute("APOS"));
+                    attributes.Add(DbAttribute.GetDbAttribute("LPOS"));
+                    attributes.Add(DbAttribute.GetDbAttribute("DTXR"));
+                    attributes.Add(DbAttribute.GetDbAttribute("MTXX"));
+                }
+
+                if (type == DbElementTypeInstance.TUBE)
+                {
+                    attributes.Add(DbAttributeInstance.FLNN);
+                }
+            }
+
+            _attributeCache[type] = attributes;
+            return attributes;
+        }
+
         private int GetDepthFromWorld(DbElement element)
         {
             int d = 0;
@@ -206,60 +262,106 @@ namespace AttFileDump
             return d;
         }
 
-        private List<DbAttribute> GetAttributes(DbElement element)
+        private void WriteHeader(StreamWriter writer, DbElement ce)
         {
-            // Similar to your logic, but cleaner
-            List<DbAttribute> attributes = new List<DbAttribute>();
-            attributes.AddRange(element.GetAttributes());
+            // Fully replicates the native PML header output formatting
+            writer.WriteLine($"AVEVA_Attributes_File v1.0 , start: NEW , end: END , name_end: {Delimiter} , sep: {Separator}");
+            writer.WriteLine("NEW Header Information");
 
-            // Add pseudo attributes manually if needed
-            // (Your logic for APOS, LPOS etc is fine here)
-            // ... (Copy your specific attribute logic here)
+            string date = DateTime.Now.ToString("dd MMM yyyy");
+            string time = DateTime.Now.ToString("HH:mm:ss");
 
-            return attributes;
-        }
+            writer.WriteLine($"  Source{Delimiter} AVEVA E3D Design Data {Separator} Date{Delimiter} {date} {Separator} Time{Delimiter} {time}");
 
-        private string GetAttributeValue(DbElement element, DbAttribute attribute)
-        {
-            // Use the passed element instance
-            try { return element.GetAsString(attribute); }
-            catch { return ""; }
-        }
+            string mdbName = MDB.CurrentMDB != null ? MDB.CurrentMDB.Name : "UNKNOWN";
+            string prjCode = Project.CurrentProject != null ? Project.CurrentProject.Code : "UNKNOWN";
+            string ceName = ce.IsValid ? ce.GetAsString(DbAttributeInstance.FLNM) : "UNKNOWN";
 
-        private void WriteHeader(StreamWriter writer)
-        {
-            // ... (Your header logic)
+            writer.WriteLine($"  Project{Delimiter} {prjCode} {Separator} MDB{Delimiter} {mdbName} {Separator} Element{Delimiter} {ceName}");
+            writer.WriteLine("END");
         }
 
         private void WriteIndentedLine(StreamWriter writer, int indent, string text)
         {
-            // Using char array is slightly faster than creating new string instances repeatedly
-            // but for file IO, string buffer is usually fine.
             writer.Write(new string(' ', indent));
             writer.WriteLine(text);
         }
 
         private string ProcessAttributeValue(string value)
         {
-            // ... (Your existing logic)
-            if (string.IsNullOrEmpty(value)) return value;
             return value.Trim().Replace("$$V", "V").Replace("$$v", "v").Replace("|", "||").Replace("$$L", "DOLLARL");
         }
 
         private bool ShouldExportAttribute(string attrValue, bool exportUnsets)
         {
-            // ... (Your existing logic)
             if (exportUnsets) return true;
-            if (string.IsNullOrEmpty(attrValue)) return false;
-            // Optimization: Use IndexOf or explicit checks instead of formatting a new string for contains
-            if (IgnorePattern.IndexOf("," + attrValue + ",") >= 0) return false;
+
+            // Compiler Warning Resolution: Culture-specific IndexOf replaced with OrdinalIgnoreCase
+            if (IgnorePattern.IndexOf("," + attrValue + ",", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+
             return true;
         }
 
-        private string FormatAttributeLine(int indent, string attrName, string attrValue, int attrSize)
+        [PMLNetCallable()]
+        public void SetUseCe(bool use)
         {
-            // ... (Your existing logic)
-            return $"{new string(' ', indent)}{attrName}{Delimiter}".PadRight(indent + attrSize + Delimiter.Length + 2) + attrValue;
+            _useCe = use;
+            // Smart Toggle: If CE is true, the others should logically be false
+            if (use)
+            {
+                _useElements = false;
+                _useDrawList = false;
+            }
+        }
+
+        [PMLNetCallable()]
+        public void SetUseElements(bool use)
+        {
+            _useElements = use;
+            if (use)
+            {
+                _useCe = false;
+                _useDrawList = false;
+            }
+        }
+
+        [PMLNetCallable()]
+        public void SetUseDrawList(bool use)
+        {
+            _useDrawList = use;
+            if (use)
+            {
+                _useCe = false;
+                _useElements = false;
+            }
+        }
+
+        [PMLNetCallable()]
+        public void SetExportUnsets(bool export)
+        {
+            _exportUnsets = export;
+        }
+
+        [PMLNetCallable()]
+        public void SetExportTube(bool export)
+        {
+            _exportTube = export;
+        }
+
+        // Helper method to add specific elements when _useElements is true
+        [PMLNetCallable()]
+        public void AddElementToExport(string elementName)
+        {
+            if (!string.IsNullOrEmpty(elementName))
+            {
+                _elementNames.Add(elementName);
+            }
+        }
+
+        [PMLNetCallable()]
+        public void ClearElements()
+        {
+            _elementNames.Clear();
         }
     }
 }

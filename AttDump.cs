@@ -3,9 +3,12 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using Aveva.Core.PMLNet;
 using Aveva.Core.Database;
 using Aveva.Core.Database.Filters;
+using Serilog;
 
 namespace AttFileDump
 {
@@ -16,12 +19,23 @@ namespace AttFileDump
         private const string Separator = "&end&";
         private const string IgnorePattern = ",unset,=0/0,";
 
-        // Readonly fields satisfy compiler warnings for single-assignment variables
+        // Core Parameters
         private bool _useCe = true;
-        private bool _useElements;
-        private bool _useDrawList;
+        private bool _useElements = false;
+        private bool _useDrawList = false;
         private bool _exportUnsets = true;
         private bool _exportTube = true;
+        
+        // Naming & Directory Parameters
+        private string _outputDirectory = @"C:\temp";
+        private string _filePrefix = "Export";
+        private string _nameDelimiter = "_";
+        private bool _singleFileOutput = false;
+
+        // XML Configuration Parameters
+        private string _xmlConfigPath = "";
+        private bool _strictXmlMode = false;
+        private Dictionary<DbElementType, HashSet<string>> _xmlFilter = null;
 
         private readonly HashSet<string> _elementNames = new HashSet<string>();
         private readonly Dictionary<DbElementType, List<DbAttribute>> _attributeCache = new Dictionary<DbElementType, List<DbAttribute>>();
@@ -30,101 +44,197 @@ namespace AttFileDump
         public AttDump() { }
 
         [PMLNetCallable()]
-        public void Assign(AttDump that)
-        {
+        public void Assign(AttDump that) 
+        { 
             _useCe = that._useCe;
             _useElements = that._useElements;
             _useDrawList = that._useDrawList;
             _exportUnsets = that._exportUnsets;
             _exportTube = that._exportTube;
-
-            // Copies the element names if any were added
+            _outputDirectory = that._outputDirectory;
+            _filePrefix = that._filePrefix;
+            _nameDelimiter = that._nameDelimiter;
+            _singleFileOutput = that._singleFileOutput;
+            _xmlConfigPath = that._xmlConfigPath;
+            _strictXmlMode = that._strictXmlMode;
+            
             _elementNames.Clear();
-            foreach (string name in that._elementNames)
+            foreach (string name in that._elementNames) _elementNames.Add(name);
+        }
+
+        #region PML Configuration Methods
+
+        [PMLNetCallable()] public void SetUseCe(bool use) { _useCe = use; if(use) { _useElements = false; _useDrawList = false; } }
+        [PMLNetCallable()] public void SetUseElements(bool use) { _useElements = use; if(use) { _useCe = false; _useDrawList = false; } }
+        [PMLNetCallable()] public void SetExportUnsets(bool export) { _exportUnsets = export; }
+        [PMLNetCallable()] public void SetExportTube(bool export) { _exportTube = export; }
+        [PMLNetCallable()] public void AddElementToExport(string elementName) { if (!string.IsNullOrEmpty(elementName)) _elementNames.Add(elementName); }
+        [PMLNetCallable()] public void ClearElements() { _elementNames.Clear(); }
+
+        // NEW: Dynamic Naming Methods
+        [PMLNetCallable()] public void SetOutputDirectory(string dir) { _outputDirectory = dir; }
+        [PMLNetCallable()] public void SetFilePrefix(string prefix) { _filePrefix = prefix; }
+        [PMLNetCallable()] public void SetNameDelimiter(string delimiter) { _nameDelimiter = string.IsNullOrEmpty(delimiter) ? "_" : delimiter; }
+        [PMLNetCallable()] public void SetSingleFileOutput(bool isSingle) { _singleFileOutput = isSingle; }
+
+        // NEW: XML Configuration Methods
+        [PMLNetCallable()] public void SetXmlConfig(string xmlPath) { _xmlConfigPath = xmlPath; }
+        [PMLNetCallable()] public void SetStrictXmlMode(bool strict) { _strictXmlMode = strict; }
+
+        #endregion
+
+        // NEW: Sample XML Generator
+        [PMLNetCallable()]
+        public void GenerateSampleXml()
+        {
+            string samplePath = @"C:\temp\sampleConfiguration.xml";
+            string xmlContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<AttDumpConfig>
+  <Element type=""SITE"">
+    <Attribute>NAME</Attribute>
+    <Attribute>DESC</Attribute>
+    <Attribute>PURP</Attribute>
+  </Element>
+  <Element type=""PIPE"">
+    <Attribute>NAME</Attribute>
+    <Attribute>BORE</Attribute>
+    <Attribute>PSPE</Attribute>
+  </Element>
+</AttDumpConfig>";
+            File.WriteAllText(samplePath, xmlContent);
+        }
+
+        private void InitializeLogger()
+        {
+            string logPath = Path.Combine(_outputDirectory, "AttDumpLog_.txt");
+            Log.Logger = new LoggerConfiguration()
+                .WriteTo.File(logPath, rollingInterval: RollingInterval.Day)
+                .CreateLogger();
+        }
+
+        private void LoadXmlConfig()
+        {
+            _xmlFilter = null;
+            if (string.IsNullOrEmpty(_xmlConfigPath) || !File.Exists(_xmlConfigPath)) return;
+
+            try
             {
-                _elementNames.Add(name);
+                _xmlFilter = new Dictionary<DbElementType, HashSet<string>>();
+                XDocument doc = XDocument.Load(_xmlConfigPath);
+                
+                foreach (var el in doc.Descendants("Element"))
+                {
+                    string typeStr = el.Attribute("type")?.Value;
+                    if (string.IsNullOrEmpty(typeStr)) continue;
+                    
+                    DbElementType type = DbElementType.GetElementType(typeStr);
+                    HashSet<string> atts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    
+                    foreach (var att in el.Descendants("Attribute"))
+                    {
+                        atts.Add(att.Value);
+                    }
+                    _xmlFilter[type] = atts;
+                }
+                Log.Information($"Loaded XML Configuration from {_xmlConfigPath}. Found rules for {_xmlFilter.Count} element types.");
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Failed to load XML Configuration.");
             }
         }
 
         [PMLNetCallable()]
-        public void GenerateAttFile(string filename)
+        public void ExecuteExtraction()
         {
-            if (string.IsNullOrEmpty(filename)) throw new ArgumentException("Filename must be supplied.");
-            if (filename.StartsWith("/")) filename = filename.Substring(1);
+            InitializeLogger();
+            Log.Information("=== Extraction Started ===");
+            var watch = System.Diagnostics.Stopwatch.StartNew();
 
-            HashSet<DbElement> rootElements = new HashSet<DbElement>();
-            DbElement currentCe = CurrentElement.Element;
-
-            // Element Collection logic
-            if (_useCe)
+            try
             {
-                if (!currentCe.IsValid) throw new InvalidOperationException("Current Element is not valid.");
+                LoadXmlConfig();
+                _attributeCache.Clear(); // Clear cache for new run
 
-                if (currentCe.GetElementType() == DbElementTypeInstance.WORLD)
+                HashSet<DbElement> rootElements = new HashSet<DbElement>();
+                DbElement currentCe = CurrentElement.Element;
+
+                // Element Collection
+                if (_useCe)
                 {
-                    TypeFilter filt = new TypeFilter(DbElementTypeInstance.SITE);
-                    DBElementCollection collection = new DBElementCollection(currentCe, filt);
-                    foreach (DbElement site in collection)
+                    if (!currentCe.IsValid) throw new InvalidOperationException("Current Element is not valid.");
+                    if (currentCe.GetElementType() == DbElementTypeInstance.WORLD)
                     {
-                        rootElements.Add(site);
+                        TypeFilter filt = new TypeFilter(DbElementTypeInstance.SITE);
+                        DBElementCollection collection = new DBElementCollection(currentCe, filt);
+                        foreach (DbElement site in collection) rootElements.Add(site);
                     }
+                    else
+                    {
+                        rootElements.Add(currentCe);
+                        AddParentsToRoots(currentCe, rootElements);
+                    }
+                }
+                else if (_useElements)
+                {
+                    foreach (string name in _elementNames)
+                    {
+                        DbElement ele = DbElement.GetElement(name);
+                        if (ele.IsValid)
+                        {
+                            rootElements.Add(ele);
+                            AddParentsToRoots(ele, rootElements);
+                        }
+                    }
+                }
+
+                if (rootElements.Count == 0) throw new InvalidOperationException("No valid elements found to export.");
+
+                var sortedRoots = rootElements.OrderBy(GetDepthFromWorld).ToList();
+
+                if (_singleFileOutput)
+                {
+                    string fileName = Path.Combine(_outputDirectory, $"{_filePrefix}.txt");
+                    using (StreamWriter writer = new StreamWriter(fileName, false, Encoding.UTF8, 131072))
+                    {
+                        WriteHeader(writer, currentCe);
+                        HashSet<DbElement> processed = new HashSet<DbElement>();
+                        foreach (DbElement root in sortedRoots) ProcessHierarchy(root, 0, writer, processed);
+                    }
+                    Log.Information($"Successfully exported {sortedRoots.Count} root elements to {fileName}");
                 }
                 else
                 {
-                    rootElements.Add(currentCe);
-                    AddParentsToRoots(currentCe, rootElements);
-                }
-            }
-            else if (_useElements && _elementNames != null)
-            {
-                foreach (string name in _elementNames)
-                {
-                    DbElement ele = DbElement.GetElement(name);
-                    if (ele.IsValid)
+                    // Multi-file Output Loop
+                    HashSet<DbElement> processed = new HashSet<DbElement>();
+                    foreach (DbElement root in sortedRoots)
                     {
-                        rootElements.Add(ele);
-                        AddParentsToRoots(ele, rootElements);
+                        string rawName = root.GetAsString(DbAttributeInstance.FLNM);
+                        // Regex replaces invalid characters AND slashes with your delimiter
+                        string safeName = Regex.Replace(rawName, @"[/\\?%*:|""<>]+", _nameDelimiter);
+                        if (safeName.StartsWith(_nameDelimiter)) safeName = safeName.Substring(_nameDelimiter.Length);
+
+                        string fileName = Path.Combine(_outputDirectory, $"{_filePrefix}_{safeName}.txt");
+                        
+                        using (StreamWriter writer = new StreamWriter(fileName, false, Encoding.UTF8, 131072))
+                        {
+                            WriteHeader(writer, root);
+                            ProcessHierarchy(root, 0, writer, processed);
+                        }
+                        Log.Information($"Exported element {rawName} to {fileName}");
                     }
                 }
             }
-            else if (_useDrawList)
+            catch (Exception ex)
             {
-                // Compiler Warning Resolution: Execution path defined.
-                // Note: Interrogating the DrawList via pure database extraction requires bridging
-                // Aveva.Core.Presentation, which is typically avoided in batch DB dumps.
-                throw new NotSupportedException("DrawList extraction is routed through the UI namespace.");
+                Log.Error(ex, "Critical failure during extraction process.");
+                throw;
             }
-
-            if (rootElements.Count == 0) throw new InvalidOperationException("No valid elements found to export.");
-
-            // Compiler Warning Resolution: Converted lambda to Method Group
-            var sortedRoots = rootElements.OrderBy(GetDepthFromWorld).ToList();
-
-            using (StreamWriter writer = new StreamWriter(filename, false, Encoding.UTF8, 131072))
+            finally
             {
-                // Pass CE to write the specific element name in the header, mimicking PML
-                WriteHeader(writer, currentCe);
-
-                HashSet<DbElement> processed = new HashSet<DbElement>();
-
-                foreach (DbElement root in sortedRoots)
-                {
-                    ProcessHierarchy(root, 0, writer, processed);
-                }
-            }
-        }
-
-        private void AddParentsToRoots(DbElement ele, HashSet<DbElement> roots)
-        {
-            DbElement ptr = ele.Owner;
-            while (ptr.IsValid && ptr.GetElementType() != DbElementTypeInstance.WORLD)
-            {
-                if (ptr.GetElementType() == DbElementTypeInstance.SITE ||
-                    ptr.GetElementType() == DbElementTypeInstance.ZONE)
-                {
-                    roots.Add(ptr);
-                }
-                ptr = ptr.Owner;
+                watch.Stop();
+                Log.Information($"=== Extraction Completed in {watch.ElapsedMilliseconds} ms ===");
+                Log.CloseAndFlush();
             }
         }
 
@@ -151,31 +261,34 @@ namespace AttFileDump
         {
             int tab = depth * 2;
             int iTab = tab + 2;
+            string elementName = string.Empty;
 
-            string elementName;
             try { elementName = element.GetAsString(DbAttributeInstance.FLNM); }
             catch { elementName = element.ToString(); }
-
+            
             WriteIndentedLine(writer, tab, "NEW " + elementName);
 
             List<DbAttribute> attributes = GetCachedAttributes(element, elementType);
+            
+            // If strict mode is on and this element isn't in the XML, attributes will be empty. Skip processing attributes.
+            if (attributes.Count == 0) return; 
 
-            // THE FIX: Replicates PML's !attl.width() by finding the longest attribute name
-            int maxNameLength = attributes.Count > 0 ? attributes.Max(a => a.Name.Length) : 0;
+            int maxNameLength = attributes.Max(a => a.Name.Length);
             int attrSize = maxNameLength + 3;
 
             StringBuilder sb = new StringBuilder(128);
 
             foreach (DbAttribute attr in attributes)
             {
-                string attrValue;
-
+                string attrValue = string.Empty; 
                 try
                 {
                     attrValue = element.GetAsString(attr);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    // Granular logging for specific attribute failures
+                    Log.Warning($"Failed to read attribute {attr.Name} on element {elementName}. Error: {ex.Message}");
                     continue;
                 }
 
@@ -189,18 +302,13 @@ namespace AttFileDump
                     if (hasDollarUnderscore) attrValue = attrValue.Replace("$$_", "DOLLARU");
 
                     sb.Clear();
-                    sb.Append(' ', iTab);
-                    sb.Append(attr.Name.ToUpper());
-                    sb.Append(Delimiter);
-
+                    sb.Append(' ', iTab).Append(attr.Name.ToUpper()).Append(Delimiter);
+                    
                     string leftPart = sb.ToString();
                     sb.Clear();
-                    // This PadRight will now correctly use the longest name length, not the total count
-                    sb.Append(leftPart.PadRight(iTab + attrSize + Delimiter.Length + 2));
-                    sb.Append(attrValue);
+                    sb.Append(leftPart.PadRight(iTab + attrSize + Delimiter.Length + 2)).Append(attrValue);
 
                     string formattedLine = sb.ToString();
-
                     if (hasDollarUnderscore) formattedLine = formattedLine.Replace("DOLLARU", "$$_");
                     if (formattedLine.Contains("DOLLARL")) formattedLine = formattedLine.Replace("DOLLARL", "$$L");
 
@@ -211,39 +319,49 @@ namespace AttFileDump
 
         private List<DbAttribute> GetCachedAttributes(DbElement element, DbElementType type)
         {
-            if (_attributeCache.TryGetValue(type, out List<DbAttribute> cachedAttrs))
-            {
-                return cachedAttrs;
-            }
+            if (_attributeCache.TryGetValue(type, out List<DbAttribute> cachedAttrs)) return cachedAttrs;
 
             List<DbAttribute> attributes = new List<DbAttribute>();
+            bool hasXml = _xmlFilter != null;
+            bool elementInXml = hasXml && _xmlFilter.ContainsKey(type);
+
+            // Strict XML Rule Check
+            if (_strictXmlMode && hasXml && !elementInXml)
+            {
+                _attributeCache[type] = attributes; // Returns empty list
+                return attributes;
+            }
+
             DbAttribute[] rawAttrs = element.GetAttributes();
 
             foreach (DbAttribute attr in rawAttrs)
             {
-                // Updated per AVEVA E3D API constraint observation
-                if (attr.Type == DbAttributeType.STRINGARRAY)
+                if (attr.Type == DbAttributeType.STRINGARRAY ) continue;
+
+                if (elementInXml)
                 {
-                    continue;
+                    // If XML rule exists for this type, ONLY add attributes listed in the XML
+                    if (_xmlFilter[type].Contains(attr.Name)) attributes.Add(attr);
                 }
-                attributes.Add(attr);
+                else
+                {
+                    // No XML rule (and not strict mode), add all valid attributes
+                    attributes.Add(attr);
+                }
             }
 
+            // Standard AVEVA pseudo-attributes (Only append if not in strict mode, or explicitly manage them)
             if (type != DbElementTypeInstance.WORLD)
             {
                 DbElement owner = element.Owner;
-                if (owner.IsValid && owner.GetElementType() == DbElementTypeInstance.BRANCH)
+                if (!elementInXml && owner.IsValid && owner.GetElementType() == DbElementTypeInstance.BRANCH)
                 {
                     attributes.Add(DbAttribute.GetDbAttribute("APOS"));
                     attributes.Add(DbAttribute.GetDbAttribute("LPOS"));
                     attributes.Add(DbAttribute.GetDbAttribute("DTXR"));
                     attributes.Add(DbAttribute.GetDbAttribute("MTXX"));
                 }
-
-                if (type == DbElementTypeInstance.TUBE)
-                {
-                    attributes.Add(DbAttributeInstance.FLNN);
-                }
+                if (!elementInXml && type == DbElementTypeInstance.TUBE) attributes.Add(DbAttributeInstance.FLNN);
             }
 
             _attributeCache[type] = attributes;
@@ -252,116 +370,37 @@ namespace AttFileDump
 
         private int GetDepthFromWorld(DbElement element)
         {
-            int d = 0;
-            DbElement p = element;
-            while (p.IsValid && p.GetElementType() != DbElementTypeInstance.WORLD)
-            {
-                d++;
-                p = p.Owner;
-            }
+            int d = 0; DbElement p = element;
+            while (p.IsValid && p.GetElementType() != DbElementTypeInstance.WORLD) { d++; p = p.Owner; }
             return d;
+        }
+        
+        private void AddParentsToRoots(DbElement ele, HashSet<DbElement> roots)
+        {
+            DbElement ptr = ele.Owner;
+            while (ptr.IsValid && ptr.GetElementType() != DbElementTypeInstance.WORLD)
+            {
+                if (ptr.GetElementType() == DbElementTypeInstance.SITE || ptr.GetElementType() == DbElementTypeInstance.ZONE) roots.Add(ptr);
+                ptr = ptr.Owner;
+            }
         }
 
         private void WriteHeader(StreamWriter writer, DbElement ce)
         {
-            // Fully replicates the native PML header output formatting
             writer.WriteLine($"AVEVA_Attributes_File v1.0 , start: NEW , end: END , name_end: {Delimiter} , sep: {Separator}");
             writer.WriteLine("NEW Header Information");
-
             string date = DateTime.Now.ToString("dd MMM yyyy");
             string time = DateTime.Now.ToString("HH:mm:ss");
-
             writer.WriteLine($"  Source{Delimiter} AVEVA E3D Design Data {Separator} Date{Delimiter} {date} {Separator} Time{Delimiter} {time}");
-
             string mdbName = MDB.CurrentMDB != null ? MDB.CurrentMDB.Name : "UNKNOWN";
             string prjCode = Project.CurrentProject != null ? Project.CurrentProject.Code : "UNKNOWN";
             string ceName = ce.IsValid ? ce.GetAsString(DbAttributeInstance.FLNM) : "UNKNOWN";
-
             writer.WriteLine($"  Project{Delimiter} {prjCode} {Separator} MDB{Delimiter} {mdbName} {Separator} Element{Delimiter} {ceName}");
             writer.WriteLine("END");
         }
 
-        private void WriteIndentedLine(StreamWriter writer, int indent, string text)
-        {
-            writer.Write(new string(' ', indent));
-            writer.WriteLine(text);
-        }
-
-        private string ProcessAttributeValue(string value)
-        {
-            return value.Trim().Replace("$$V", "V").Replace("$$v", "v").Replace("|", "||").Replace("$$L", "DOLLARL");
-        }
-
-        private bool ShouldExportAttribute(string attrValue, bool exportUnsets)
-        {
-            if (exportUnsets) return true;
-
-            // Compiler Warning Resolution: Culture-specific IndexOf replaced with OrdinalIgnoreCase
-            if (IgnorePattern.IndexOf("," + attrValue + ",", StringComparison.OrdinalIgnoreCase) >= 0) return false;
-
-            return true;
-        }
-
-        [PMLNetCallable()]
-        public void SetUseCe(bool use)
-        {
-            _useCe = use;
-            // Smart Toggle: If CE is true, the others should logically be false
-            if (use)
-            {
-                _useElements = false;
-                _useDrawList = false;
-            }
-        }
-
-        [PMLNetCallable()]
-        public void SetUseElements(bool use)
-        {
-            _useElements = use;
-            if (use)
-            {
-                _useCe = false;
-                _useDrawList = false;
-            }
-        }
-
-        [PMLNetCallable()]
-        public void SetUseDrawList(bool use)
-        {
-            _useDrawList = use;
-            if (use)
-            {
-                _useCe = false;
-                _useElements = false;
-            }
-        }
-
-        [PMLNetCallable()]
-        public void SetExportUnsets(bool export)
-        {
-            _exportUnsets = export;
-        }
-
-        [PMLNetCallable()]
-        public void SetExportTube(bool export)
-        {
-            _exportTube = export;
-        }
-
-        // Helper method to add specific elements when _useElements is true
-        [PMLNetCallable()]
-        public void AddElementToExport(string elementName)
-        {
-            if (!string.IsNullOrEmpty(elementName))
-            {
-                _elementNames.Add(elementName);
-            }
-        }
-
-        [PMLNetCallable()]
-        public void ClearElements()
-        {
-            _elementNames.Clear();
-        }
+        private void WriteIndentedLine(StreamWriter writer, int indent, string text) { writer.Write(new string(' ', indent)); writer.WriteLine(text); }
+        private string ProcessAttributeValue(string value) { return value.Trim().Replace("$$V", "V").Replace("$$v", "v").Replace("|", "||").Replace("$$L", "DOLLARL"); }
+        private bool ShouldExportAttribute(string attrValue, bool exportUnsets) { if (exportUnsets) return true; if (IgnorePattern.IndexOf("," + attrValue + ",", StringComparison.OrdinalIgnoreCase) >= 0) return false; return true; }
     }
 }
