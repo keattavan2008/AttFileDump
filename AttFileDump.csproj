@@ -23,23 +23,52 @@
         <ErrorReport>prompt</ErrorReport>
         <WarningLevel>4</WarningLevel>
     </PropertyGroup>
-    <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-        <PlatformTarget>AnyCPU</PlatformTarget>
+    <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|X64' ">
         <DebugType>pdbonly</DebugType>
         <Optimize>true</Optimize>
-        <OutputPath>bin\Release\</OutputPath>
         <DefineConstants>TRACE</DefineConstants>
         <ErrorReport>prompt</ErrorReport>
         <WarningLevel>4</WarningLevel>
+      <OutputPath>bin\X64\Release\</OutputPath>
+      <PlatformTarget>X64</PlatformTarget>
     </PropertyGroup>
     <ItemGroup>
+        <Reference Include="Aveva.ApplicationFramework">
+          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\3100.2504.1617.4807\Aveva.ApplicationFramework.dll</HintPath>
+          <Private>False</Private>
+        </Reference>
+        <Reference Include="Aveva.ApplicationFramework.Presentation">
+          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\3100.2504.1617.4807\Aveva.ApplicationFramework.Presentation.dll</HintPath>
+          <Private>False</Private>
+        </Reference>
+        <Reference Include="Aveva.Core.Database">
+          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\3100.2504.1617.4807\Aveva.Core.Database.dll</HintPath>
+          <Private>False</Private>
+        </Reference>
+        <Reference Include="Aveva.Core.Database.Filters">
+          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\3100.2504.1617.4807\Aveva.Core.Database.Filters.dll</HintPath>
+          <Private>False</Private>
+        </Reference>
+        <Reference Include="Aveva.Core.Presentation">
+          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\3100.2504.1617.4807\Aveva.Core.Presentation.dll</HintPath>
+          <Private>False</Private>
+        </Reference>
+        <Reference Include="PMLNet">
+          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\3100.2504.1617.4807\PMLNet.dll</HintPath>
+          <Private>False</Private>
+        </Reference>
+        <Reference Include="PMLNetUtilities">
+          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\3100.2504.1617.4807\PMLNetUtilities.dll</HintPath>
+          <Private>False</Private>
+        </Reference>
         <Reference Include="System"/>
         <Reference Include="System.Core"/>
         <Reference Include="System.Data"/>
+        <Reference Include="System.Windows.Forms" />
         <Reference Include="System.Xml"/>
     </ItemGroup>
     <ItemGroup>
-        <Compile Include="Class1.cs"/>
+        <Compile Include="AttDump.cs" />
         <Compile Include="Properties\AssemblyInfo.cs"/>
     </ItemGroup>
     <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets"/>
