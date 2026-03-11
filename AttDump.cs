@@ -21,31 +21,35 @@ namespace AttFileDump
 
         // Core Parameters
         private bool _useCe = true;
-        private bool _useElements = false;
-        private bool _useDrawList = false;
+        private bool _useElements;
+        private bool _useDrawList;
         private bool _exportUnsets = true;
         private bool _exportTube = true;
-        
+
         // Naming & Directory Parameters
         private string _outputDirectory = @"C:\temp";
-        private string _filePrefix = "Export";
+        private string _filePrefix;
         private string _nameDelimiter = "_";
-        private bool _singleFileOutput = false;
+        private bool _singleFileOutput;
 
         // XML Configuration Parameters
         private string _xmlConfigPath = "";
-        private bool _strictXmlMode = false;
-        private Dictionary<DbElementType, HashSet<string>> _xmlFilter = null;
+        private bool _strictXmlMode;
+        private Dictionary<DbElementType, HashSet<string>> _xmlFilter;
 
         private readonly HashSet<string> _elementNames = new HashSet<string>();
         private readonly Dictionary<DbElementType, List<DbAttribute>> _attributeCache = new Dictionary<DbElementType, List<DbAttribute>>();
+
+        // Dynamic Skip Logic
+        private string _skipAttributeName = "";
+        private HashSet<string> _skipValues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         [PMLNetCallable()]
         public AttDump() { }
 
         [PMLNetCallable()]
-        public void Assign(AttDump that) 
-        { 
+        public void Assign(AttDump that)
+        {
             _useCe = that._useCe;
             _useElements = that._useElements;
             _useDrawList = that._useDrawList;
@@ -57,15 +61,15 @@ namespace AttFileDump
             _singleFileOutput = that._singleFileOutput;
             _xmlConfigPath = that._xmlConfigPath;
             _strictXmlMode = that._strictXmlMode;
-            
+
             _elementNames.Clear();
             foreach (string name in that._elementNames) _elementNames.Add(name);
         }
 
         #region PML Configuration Methods
 
-        [PMLNetCallable()] public void SetUseCe(bool use) { _useCe = use; if(use) { _useElements = false; _useDrawList = false; } }
-        [PMLNetCallable()] public void SetUseElements(bool use) { _useElements = use; if(use) { _useCe = false; _useDrawList = false; } }
+        [PMLNetCallable()] public void SetUseCe(bool use) { _useCe = use; if (use) { _useElements = false; _useDrawList = false; } }
+        [PMLNetCallable()] public void SetUseElements(bool use) { _useElements = use; if (use) { _useCe = false; _useDrawList = false; } }
         [PMLNetCallable()] public void SetExportUnsets(bool export) { _exportUnsets = export; }
         [PMLNetCallable()] public void SetExportTube(bool export) { _exportTube = export; }
         [PMLNetCallable()] public void AddElementToExport(string elementName) { if (!string.IsNullOrEmpty(elementName)) _elementNames.Add(elementName); }
@@ -80,6 +84,8 @@ namespace AttFileDump
         // NEW: XML Configuration Methods
         [PMLNetCallable()] public void SetXmlConfig(string xmlPath) { _xmlConfigPath = xmlPath; }
         [PMLNetCallable()] public void SetStrictXmlMode(bool strict) { _strictXmlMode = strict; }
+        [PMLNetCallable()] public void SetSkipAttribute(string attributeName) { _skipAttributeName = attributeName; }
+        [PMLNetCallable()] public void AddSkipValue(string triggerValue) { if (!string.IsNullOrEmpty(triggerValue)) _skipValues.Add(triggerValue); }
 
         #endregion
 
@@ -99,6 +105,11 @@ namespace AttFileDump
     <Attribute>NAME</Attribute>
     <Attribute>BORE</Attribute>
     <Attribute>PSPE</Attribute>
+  </Element>
+  <Element type=""EQUIPMENT"">
+    <Attribute>NAME</Attribute>
+    <Attribute>DESC</Attribute>
+    <Attribute>FUNC</Attribute>
   </Element>
 </AttDumpConfig>";
             File.WriteAllText(samplePath, xmlContent);
@@ -121,15 +132,15 @@ namespace AttFileDump
             {
                 _xmlFilter = new Dictionary<DbElementType, HashSet<string>>();
                 XDocument doc = XDocument.Load(_xmlConfigPath);
-                
+
                 foreach (var el in doc.Descendants("Element"))
                 {
                     string typeStr = el.Attribute("type")?.Value;
                     if (string.IsNullOrEmpty(typeStr)) continue;
-                    
+
                     DbElementType type = DbElementType.GetElementType(typeStr);
                     HashSet<string> atts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    
+
                     foreach (var att in el.Descendants("Attribute"))
                     {
                         atts.Add(att.Value);
@@ -147,6 +158,7 @@ namespace AttFileDump
         [PMLNetCallable()]
         public void ExecuteExtraction()
         {
+            // _filePrefix = Project.CurrentProject.Code;
             InitializeLogger();
             Log.Information("=== Extraction Started ===");
             var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -215,7 +227,7 @@ namespace AttFileDump
                         if (safeName.StartsWith(_nameDelimiter)) safeName = safeName.Substring(_nameDelimiter.Length);
 
                         string fileName = Path.Combine(_outputDirectory, $"{_filePrefix}_{safeName}.txt");
-                        
+
                         using (StreamWriter writer = new StreamWriter(fileName, false, Encoding.UTF8, 131072))
                         {
                             WriteHeader(writer, root);
@@ -242,6 +254,25 @@ namespace AttFileDump
         {
             if (!processed.Add(element)) return;
 
+            // --- NEW SKIP LOGIC (TREE PRUNING) ---
+            if (!string.IsNullOrEmpty(_skipAttributeName))
+            {
+                DbAttribute skipAttr = DbAttribute.GetDbAttribute(_skipAttributeName);
+                if (skipAttr != null && element.IsAttributeValid(skipAttr))
+                {
+                    string attrVal = string.Empty;
+                    try { attrVal = element.GetAsString(skipAttr); } catch { }
+
+                    if (!string.IsNullOrEmpty(attrVal) && _skipValues.Contains(attrVal))
+                    {
+                        // Log the prune and immediately exit. Children are completely ignored!
+                        Log.Information($"Tree Pruned: Skipped {element.GetElementType()} {element} due to {_skipAttributeName} = {attrVal}");
+                        return;
+                    }
+                }
+            }
+            // -------------------------------------
+
             DbElementType elementType = element.GetElementType();
 
             if (elementType == DbElementTypeInstance.TUBE && !_exportTube) return;
@@ -261,17 +292,17 @@ namespace AttFileDump
         {
             int tab = depth * 2;
             int iTab = tab + 2;
-            string elementName = string.Empty;
+            string elementName;
 
             try { elementName = element.GetAsString(DbAttributeInstance.FLNM); }
             catch { elementName = element.ToString(); }
-            
+
             WriteIndentedLine(writer, tab, "NEW " + elementName);
 
             List<DbAttribute> attributes = GetCachedAttributes(element, elementType);
-            
+
             // If strict mode is on and this element isn't in the XML, attributes will be empty. Skip processing attributes.
-            if (attributes.Count == 0) return; 
+            if (attributes.Count == 0) return;
 
             int maxNameLength = attributes.Max(a => a.Name.Length);
             int attrSize = maxNameLength + 3;
@@ -280,7 +311,7 @@ namespace AttFileDump
 
             foreach (DbAttribute attr in attributes)
             {
-                string attrValue = string.Empty; 
+                string attrValue;
                 try
                 {
                     attrValue = element.GetAsString(attr);
@@ -303,7 +334,7 @@ namespace AttFileDump
 
                     sb.Clear();
                     sb.Append(' ', iTab).Append(attr.Name.ToUpper()).Append(Delimiter);
-                    
+
                     string leftPart = sb.ToString();
                     sb.Clear();
                     sb.Append(leftPart.PadRight(iTab + attrSize + Delimiter.Length + 2)).Append(attrValue);
@@ -336,7 +367,7 @@ namespace AttFileDump
 
             foreach (DbAttribute attr in rawAttrs)
             {
-                if (attr.Type == DbAttributeType.STRINGARRAY ) continue;
+                if (attr.Type == DbAttributeType.STRINGARRAY) continue;
 
                 if (elementInXml)
                 {
@@ -358,6 +389,8 @@ namespace AttFileDump
                 {
                     attributes.Add(DbAttribute.GetDbAttribute("APOS"));
                     attributes.Add(DbAttribute.GetDbAttribute("LPOS"));
+                    attributes.Add(DbAttribute.GetDbAttribute("ADIR"));
+                    attributes.Add(DbAttribute.GetDbAttribute("LDIR"));
                     attributes.Add(DbAttribute.GetDbAttribute("DTXR"));
                     attributes.Add(DbAttribute.GetDbAttribute("MTXX"));
                 }
@@ -374,7 +407,7 @@ namespace AttFileDump
             while (p.IsValid && p.GetElementType() != DbElementTypeInstance.WORLD) { d++; p = p.Owner; }
             return d;
         }
-        
+
         private void AddParentsToRoots(DbElement ele, HashSet<DbElement> roots)
         {
             DbElement ptr = ele.Owner;
