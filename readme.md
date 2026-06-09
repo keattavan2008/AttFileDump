@@ -40,10 +40,19 @@ endhandle
   -- 1. Instantiate the Exporter
   !exporter = object AttDump()
 
+  -- optional settings which can be set
+  !exporter.SetExportUnsets(false)  $* default set to true if this is not initialised explicitly
+  !exporter.SetExportTube(false) $* default set to true if this is not initialised explicitly
+
   -- 2. Define Target Elements
   !exporter.SetUseElements(true)
   !exporter.AddElementToExport('/SITE-PIPING-AREA01')
   !exporter.AddElementToExport('/SITE-EQUIP-AREA01')
+
+  -- Alternative to 2.
+  -- using the CE
+  -- !exporter.SetUseCe(true) $* this is used to extract current element only
+  -- export attributes from the drawlist at the moment not available.
 
   -- 3. Dynamic Tree Pruning (Skip Logic)
   -- Skips any element (and its children) where :void is True or 1
@@ -67,6 +76,10 @@ endhandle
   -- 6. Execute Extraction
   $P Starting high-speed attribute extraction...
   !exporter.ExecuteExtraction()
+
+  -- Optional, to use before extraction on which method to use.
+  -- 7. Generate Sample XML File
+  !exporter.GenerateSampleXml()
 
   handle any
     $P Extraction encountered an error: $!!error.text
@@ -130,6 +143,6 @@ Elements successfully exported and their destination file paths.
 
 Elements pruned by the skip logic.
 
-Non-fatal warnings for missing catalog data (e.g., unable to resolve MTXX or APOS).
+Non-fatal warnings for missing catalog data (e.g., unable to resolve MTXX or SPRE).
 
 ---
