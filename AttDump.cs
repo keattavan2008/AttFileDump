@@ -75,13 +75,13 @@ namespace AttFileDump
         [PMLNetCallable()] public void AddElementToExport(string elementName) { if (!string.IsNullOrEmpty(elementName)) _elementNames.Add(elementName); }
         [PMLNetCallable()] public void ClearElements() { _elementNames.Clear(); }
 
-        // NEW: Dynamic Naming Methods
+        // Dynamic Naming Methods
         [PMLNetCallable()] public void SetOutputDirectory(string dir) { _outputDirectory = dir; }
         [PMLNetCallable()] public void SetFilePrefix(string prefix) { _filePrefix = prefix; }
         [PMLNetCallable()] public void SetNameDelimiter(string delimiter) { _nameDelimiter = string.IsNullOrEmpty(delimiter) ? "_" : delimiter; }
         [PMLNetCallable()] public void SetSingleFileOutput(bool isSingle) { _singleFileOutput = isSingle; }
 
-        // NEW: XML Configuration Methods
+        // XML Configuration Methods
         [PMLNetCallable()] public void SetXmlConfig(string xmlPath) { _xmlConfigPath = xmlPath; }
         [PMLNetCallable()] public void SetStrictXmlMode(bool strict) { _strictXmlMode = strict; }
         [PMLNetCallable()] public void SetSkipAttribute(string attributeName) { _skipAttributeName = attributeName; }
@@ -89,7 +89,7 @@ namespace AttFileDump
 
         #endregion
 
-        // NEW: Sample XML Generator
+        // Sample XML Generator
         [PMLNetCallable()]
         public void GenerateSampleXml()
         {
@@ -254,7 +254,7 @@ namespace AttFileDump
         {
             if (!processed.Add(element)) return;
 
-            // --- NEW SKIP LOGIC (TREE PRUNING) ---
+            // --- SKIP LOGIC (TREE PRUNING) ---
             if (!string.IsNullOrEmpty(_skipAttributeName))
             {
                 DbAttribute skipAttr = DbAttribute.GetDbAttribute(_skipAttributeName);
