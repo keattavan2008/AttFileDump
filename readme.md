@@ -37,6 +37,7 @@ handle any
   return
 endhandle
 
+  using namespace 'AttFileDump'
   -- 1. Instantiate the Exporter
   !exporter = object AttDump()
 
