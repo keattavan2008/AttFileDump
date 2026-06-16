@@ -1,0 +1,34 @@
+name: Build AttFileDump DLL
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    # 1. Check out the code
+    # NOTE: If your repo requires strict SHAs, replace @v4 with the SHA like you did earlier
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    # 2. Setup the .NET SDK
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+
+    # 3. Restore packages and Build the Release DLL
+    - name: Build Project
+      run: dotnet build AttFileDump.csproj -c Release
+
+    # 4. Upload the compiled DLL so you can download it from GitHub
+    - name: Upload DLL Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: AttFileDump-Release-DLL
+        path: bin/Release/net48/AttFileDump.dll
