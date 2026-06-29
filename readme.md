@@ -2,16 +2,17 @@
 
 A blazing-fast, enterprise-grade .NET (C#) attribute extraction engine for AVEVA E3D. Designed as a direct, high-performance replacement for the default `mattdump` PML macro.
 
-By shifting the heavy lifting—such as database traversal, string manipulation, XML parsing, and disk I/O—from interpreted PML to compiled .NET, and utilizing a highly optimized v2.0 database interop architecture, this utility handles massive enterprise-scale data with ease. It bypasses native PML bottlenecks to deliver exponential speedups (exact performance gains scale dynamically based on database size and your E3D host architecture, x86 vs. x64), often reducing multi-hour native extractions down to a matter of minutes while perfectly matching the native AVEVA E3D output format.
+By shifting the heavy lifting—such as database traversal, string manipulation, XML parsing, and disk I/O—from interpreted PML to compiled .NET, and utilizing a highly optimized v2.1 database interop architecture, this utility handles massive enterprise-scale data with ease. It bypasses native PML bottlenecks to deliver exponential speedups (exact performance gains scale dynamically based on database size and your E3D host `architecture, x86 vs. x64`), often reducing multi-hour native extractions down to a matter of minutes while perfectly matching the native AVEVA E3D output format.
 
 ## 🚀 Key Features
 
 - **Extreme Performance & Interop Bypass:** Utilizes intelligent attribute caching. In Strict XML mode, the engine entirely bypasses the expensive `element.GetAttributes()` system call, interrogating the database only for specific keys to virtually eliminate .NET/Unmanaged latency.
+- **Global Attribute & Expression Inheritance:** Define general attributes (like `NAME`, `DESC`) or complex PML expressions (like `NAME OF SITE`) once in a global configuration block. They automatically cascade to all extracted element types without repetitive manual mapping.
 - **Dynamic Tree Pruning (Skip Logic):** Define rules to instantly drop entire hierarchy branches (e.g., skip elements and all their children if `:void` = `True`), with O(1) hash-set lookups to save massive amounts of processing time.
-- **XML-Driven Filtering & Aliasing:** Control exactly which attributes are exported for specific element types using an external XML file. Seamlessly rename attributes on the fly using the `alias` tag. 
+- **XML-Driven Filtering & Aliasing:** Control exactly what is exported for specific element types using an external XML file. Seamlessly rename attributes or override global configuration rules on the fly using the `alias` tag.
 - **Smart Regex File Naming:** Automatically sanitizes complex AVEVA names (like `/SITE-PIPING-AREA01`) into safe file names using customizable delimiters. Intelligently handles empty prefixes to ensure clean file names.
 - **Multi-File Output:** Automatically split massive database exports into individual text files per root element, or combine them into a single master file.
-- **Enterprise Logging:** Fully integrated with **Serilog**. Generates daily rolling logs, tracks execution times, gracefully handles missing catalog data, and shifts heavy tree-pruning logs to `Debug` level to prevent I/O blocking.
+- **Enterprise Logging & Debug Control:** Fully integrated with Serilog. Generates daily rolling logs, tracks execution times down to the millisecond, and features dynamic log-level toggling via PML commands (`SetLogLevel`) to keep your production runs clean.
 
 ## 📋 Prerequisites
 
@@ -71,6 +72,17 @@ The legacy E3D framework uses a straightforward Add-in registration. Since this 
 </ArrayOfString>
 ```
 
+## ⚙️ Logging & PML Integration
+
+Administrators can dynamically control the verbosity of the extraction logs at runtime using the `SetLogLevel(INTEGER)` method. This prevents disk I/O bottlenecks during massive production runs while allowing deep troubleshooting when verifying new configurations.
+
+| Integer Value | Serilog Log Level | Description / Use Case |
+| :--- | :--- | :--- |
+| **`0`** | `Debug` | High verbosity. Tracks tree-pruning, skipped branches, and granular internal events. |
+| **`1`** | `Information` | **Default.** Logs extraction start/stop metrics, configuration load rules, and basic telemetry. |
+| **`2`** | `Warning` | Logs syntax errors in custom PML expressions or unresolvable UDA/attribute definitions. |
+| **`3`** | `Error` | Low verbosity. Only logs critical process failures that halt execution. |
+
 ## 💻 Usage (PML Interface)
 
 The engine is controlled entirely via PML. The C# logic remains safely encapsulated. Below is a standard PML execution macro:
@@ -119,12 +131,16 @@ endhandle
   -- FALSE = Elements NOT in the XML dump ALL their default attributes.
   !exporter.SetStrictXmlMode(false)
 
-  -- 6. Execute Extraction
+  -- 6.Serilog Configuration
+  -- optional, by default logging is set to 1
+  !exporter.SetLogLevel(2)
+
+  -- 7. Execute Extraction
   $P Starting high-speed attribute extraction...
   !exporter.ExecuteExtraction()
 
   -- Optional, to use before extraction on which method to use.
-  -- 7. Generate Sample XML File
+  -- 8. Generate Sample XML File
   !exporter.GenerateSampleXml()
 
   handle any
