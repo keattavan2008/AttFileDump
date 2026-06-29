@@ -9,6 +9,7 @@ using Aveva.Core.PMLNet;
 using Aveva.Core.Database;
 using Aveva.Core.Database.Filters;
 using Serilog;
+using Serilog.Core;
 
 namespace AttFileDump
 {
@@ -42,24 +43,31 @@ namespace AttFileDump
         private string _xmlConfigPath = "";
         private bool _strictXmlMode;
         private Dictionary<DbElementType, Dictionary<string, string>> _xmlFilter;
+        private readonly HashSet<DbElementType> _includedElements = new HashSet<DbElementType>();
+        private readonly HashSet<DbAttribute> _excludedAttributes = new HashSet<DbAttribute>();
+        private readonly Dictionary<string, string> _globalAttributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         private readonly HashSet<string> _elementNames = new HashSet<string>();
 
         // Caching structures
         private readonly Dictionary<DbElementType, TypeExportProfile> _attributeCache = new Dictionary<DbElementType, TypeExportProfile>();
+        private readonly LoggingLevelSwitch _levelSwitch = new LoggingLevelSwitch();
 
-        private struct ExportAttribute
+        private readonly struct ExportItem
         {
-            public DbAttribute DbAttr;
-            public string ExportName;
-            public ExportAttribute(DbAttribute attr, string exportName) { DbAttr = attr; ExportName = exportName; }
+            public readonly DbAttribute DbAttr;
+            public readonly DbExpression DbExpr;
+            public readonly string ExportName;
+            public bool IsExpression => DbExpr != null;
+            public ExportItem(DbAttribute attr, string exportName) { DbAttr = attr; DbExpr = null; ExportName = exportName; }
+            public ExportItem(DbExpression expr, string exportName) { DbAttr = null; DbExpr = expr; ExportName = exportName; }
         }
 
         private class TypeExportProfile
         {
-            public List<ExportAttribute> Attributes = new List<ExportAttribute>();
-            public int MaxNameLength = 0;
-            public bool SuppressPseudos = false;
+            public readonly List<ExportItem> Attributes = new List<ExportItem>();
+            public int MaxNameLength;
+            public bool SuppressPseudos;
         }
 
         // Dynamic Skip Logic
@@ -115,6 +123,19 @@ namespace AttFileDump
         [PMLNetCallable()] public void SetSkipAttribute(string attributeName) { _skipAttributeName = attributeName; }
         [PMLNetCallable()] public void AddSkipValue(string triggerValue) { if (!string.IsNullOrEmpty(triggerValue)) _skipValues.Add(triggerValue); }
 
+        [PMLNetCallable()]
+        public void SetLogLevel(int level)
+        {
+            switch (level)
+            {
+                case 0: _levelSwitch.MinimumLevel = Serilog.Events.LogEventLevel.Debug; break;
+                case 1: _levelSwitch.MinimumLevel = Serilog.Events.LogEventLevel.Information; break;
+                case 2: _levelSwitch.MinimumLevel = Serilog.Events.LogEventLevel.Warning; break;
+                case 3: _levelSwitch.MinimumLevel = Serilog.Events.LogEventLevel.Error; break;
+                default: _levelSwitch.MinimumLevel = Serilog.Events.LogEventLevel.Information; break;
+            }
+        }
+
         #endregion
 
         [PMLNetCallable()]
@@ -123,20 +144,27 @@ namespace AttFileDump
             string samplePath = @"C:\temp\sampleConfiguration.xml";
             string xmlContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
 <AttDumpConfig>
+  <IncludedElements>
+    <Type>SITE</Type>
+    <Type>ZONE</Type>
+    <Type>PIPE</Type>
+    <Type>EQUIPMENT</Type>
+  </IncludedElements>
+  <IncludedAttributes>
+    <Attribute alias=""System Type"">STYPE</Attribute>
+    <Expression alias=""Name Length"">LENGTH(NAME)</Expression>
+  </IncludedAttributes>
+  <ExcludedAttributes>
+    <Attribute>USERM</Attribute>
+    <Attribute>LASTM</Attribute>
+  </ExcludedAttributes>
   <Element type=""SITE"">
     <Attribute alias=""Site Name"">NAME</Attribute>
-    <Attribute>DESC</Attribute>
-    <Attribute>PURP</Attribute>
+    <Expression alias=""Site Length"">LENGTH OF SITE</Expression>
   </Element>
   <Element type=""PIPE"">
     <Attribute>NAME</Attribute>
     <Attribute>BORE</Attribute>
-    <Attribute>PSPE</Attribute>
-  </Element>
-  <Element type=""EQUIPMENT"">
-    <Attribute>NAME</Attribute>
-    <Attribute>DESC</Attribute>
-    <Attribute>FUNC</Attribute>
   </Element>
 </AttDumpConfig>";
             File.WriteAllText(samplePath, xmlContent);
@@ -146,7 +174,7 @@ namespace AttFileDump
         {
             string logPath = Path.Combine(_outputDirectory, "AttDumpLog_.txt");
             Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Debug()
+                .MinimumLevel.ControlledBy(_levelSwitch)
                 .WriteTo.File(logPath, rollingInterval: RollingInterval.Day)
                 .CreateLogger();
         }
@@ -154,12 +182,64 @@ namespace AttFileDump
         private void LoadXmlConfig()
         {
             _xmlFilter = null;
+            _includedElements.Clear();
+            _excludedAttributes.Clear();
+            _globalAttributes.Clear();
+
             if (string.IsNullOrEmpty(_xmlConfigPath) || !File.Exists(_xmlConfigPath)) return;
 
             try
             {
                 _xmlFilter = new Dictionary<DbElementType, Dictionary<string, string>>();
                 XDocument doc = XDocument.Load(_xmlConfigPath);
+
+                var includedElementsNode = doc.Descendants("IncludedElements").FirstOrDefault();
+                if (includedElementsNode != null)
+                {
+                    foreach (var child in includedElementsNode.Elements())
+                    {
+                        string typeStr = child.Value;
+                        if (!string.IsNullOrEmpty(typeStr))
+                        {
+                            try { _includedElements.Add(DbElementType.GetElementType(typeStr)); }
+                            catch (Exception) { Log.Warning($"Could not load included element type: {typeStr}"); }
+                        }
+                    }
+                }
+
+                var excludedAttributesNode = doc.Descendants("ExcludedAttributes").FirstOrDefault();
+                if (excludedAttributesNode != null)
+                {
+                    foreach (var child in excludedAttributesNode.Elements())
+                    {
+                        string attrStr = child.Value;
+                        if (!string.IsNullOrEmpty(attrStr))
+                        {
+                            try { _excludedAttributes.Add(DbAttribute.GetDbAttribute(attrStr)); }
+                            catch (Exception) { Log.Warning($"Could not load excluded attribute: {attrStr}"); }
+                        }
+                    }
+                }
+
+                var includedAttributesNode = doc.Descendants("IncludedAttributes").FirstOrDefault();
+                if (includedAttributesNode != null)
+                {
+                    foreach (var att in includedAttributesNode.Elements())
+                    {
+                        if (att.Name == "Attribute")
+                        {
+                            string originalName = att.Value;
+                            string alias = att.Attribute("alias")?.Value ?? originalName.ToUpper();
+                            _globalAttributes[originalName] = alias;
+                        }
+                        else if (att.Name == "Expression")
+                        {
+                            string exprStr = att.Value;
+                            string alias = att.Attribute("alias")?.Value ?? exprStr;
+                            _globalAttributes["EXP:" + exprStr] = alias;
+                        }
+                    }
+                }
 
                 foreach (var el in doc.Descendants("Element"))
                 {
@@ -169,15 +249,24 @@ namespace AttFileDump
                     DbElementType type = DbElementType.GetElementType(typeStr);
                     var atts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-                    foreach (var att in el.Descendants("Attribute"))
+                    foreach (var att in el.Elements())
                     {
-                        string originalName = att.Value;
-                        string alias = att.Attribute("alias")?.Value ?? originalName.ToUpper();
-                        atts[originalName] = alias;
+                        if (att.Name == "Attribute")
+                        {
+                            string originalName = att.Value;
+                            string alias = att.Attribute("alias")?.Value ?? originalName.ToUpper();
+                            atts[originalName] = alias;
+                        }
+                        else if (att.Name == "Expression")
+                        {
+                            string exprStr = att.Value;
+                            string alias = att.Attribute("alias")?.Value ?? exprStr;
+                            atts["EXP:" + exprStr] = alias;
+                        }
                     }
                     _xmlFilter[type] = atts;
                 }
-                Log.Information($"Loaded XML Configuration from {_xmlConfigPath}. Found rules for {_xmlFilter.Count} element types.");
+                Log.Information($"Loaded XML Configuration from {_xmlConfigPath}. rules: {_xmlFilter.Count}, whitelist: {_includedElements.Count}, blacklist: {_excludedAttributes.Count}");
             }
             catch (Exception ex)
             {
@@ -243,17 +332,19 @@ namespace AttFileDump
                     string baseFileName = string.IsNullOrEmpty(_filePrefix) ? "Export" : _filePrefix;
                     string fileName = Path.Combine(_outputDirectory, $"{baseFileName}.txt");
 
-                    using (StreamWriter writer = new StreamWriter(fileName, false, Encoding.UTF8, 131072))
+                    using (StreamWriter writer = new StreamWriter(fileName, false, Encoding.UTF8, 81920))
                     {
                         WriteHeader(writer, currentCe);
-                        HashSet<DbElement> processed = new HashSet<DbElement>();
-                        foreach (DbElement root in sortedRoots) ProcessHierarchy(root, 0, writer, processed, skipAttr);
+                        HashSet<string> processed = new HashSet<string>(250000);
+                        int processedCount = 0;
+                        foreach (DbElement root in sortedRoots) ProcessHierarchy(root, 0, writer, processed, skipAttr, ref processedCount);
                     }
-                    Log.Information($"Successfully exported {sortedRoots.Count} root elements to {fileName}");
+                    Log.Information("Successfully exported {SortedRootsCount} root elements to {FileName}", sortedRoots.Count, fileName);
                 }
                 else
                 {
-                    HashSet<DbElement> processed = new HashSet<DbElement>();
+                    HashSet<string> processed = new HashSet<string>(250000);
+                    int processedCount = 0;
                     foreach (DbElement root in sortedRoots)
                     {
                         string rawName = root.GetAsString(DbAttributeInstance.FLNM);
@@ -267,10 +358,10 @@ namespace AttFileDump
 
                         string fileName = Path.Combine(_outputDirectory, $"{baseFileName}.txt");
 
-                        using (StreamWriter writer = new StreamWriter(fileName, false, Encoding.UTF8, 131072))
+                        using (StreamWriter writer = new StreamWriter(fileName, false, Encoding.UTF8, 81920))
                         {
                             WriteHeader(writer, root);
-                            ProcessHierarchy(root, 0, writer, processed, skipAttr);
+                            ProcessHierarchy(root, 0, writer, processed, skipAttr, ref processedCount);
                         }
                     }
                 }
@@ -283,23 +374,32 @@ namespace AttFileDump
             finally
             {
                 watch.Stop();
-                Log.Information($"=== Extraction Completed in {watch.ElapsedMilliseconds} ms ===");
+                Log.Information($@"=== Extraction Completed in {watch.Elapsed:hh\:mm\:ss\.fff} ===");
                 Log.CloseAndFlush();
             }
         }
 
-        private void ProcessHierarchy(DbElement element, int currentDepth, StreamWriter writer, HashSet<DbElement> processed, DbAttribute skipAttr)
+        private void ProcessHierarchy(DbElement element, int currentDepth, StreamWriter writer, HashSet<string> processed, DbAttribute skipAttr, ref int processedCount)
         {
-            if (!processed.Add(element)) return;
+            string elRef = element.GetAsString(DbAttributeInstance.REF);
+            if (!processed.Add(elRef)) return;
+
+            processedCount++;
+            if (processedCount % 250000 == 0)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
 
             if (skipAttr != null && element.IsAttributeValid(skipAttr))
             {
                 string attrVal = string.Empty;
-                try { attrVal = element.GetAsString(skipAttr); } catch { }
+                try { attrVal = element.GetAsString(skipAttr); } catch (Exception ex)
+                { Log.Error(ex, "Skipping attribute"); }
 
                 if (!string.IsNullOrEmpty(attrVal) && _skipValues.Contains(attrVal))
                 {
-                    Log.Debug($"Pruned: Skipped {element.GetElementType()} {element} ({_skipAttributeName} = {attrVal})");
+                    Log.Debug("Pruned: Skipped {GetElementType} {DbElement} ({SkipAttributeName} = {AttrVal})", element.GetElementType(), element, _skipAttributeName, attrVal);
                     return;
                 }
             }
@@ -307,12 +407,14 @@ namespace AttFileDump
             DbElementType elementType = element.GetElementType();
             if (elementType == DbElementTypeInstance.TUBE && !_exportTube) return;
 
+            if (_includedElements.Count > 0 && !_includedElements.Contains(elementType)) return;
+
             WriteElementData(element, elementType, currentDepth, writer);
 
             DbElement[] children = element.Members();
             foreach (DbElement child in children)
             {
-                ProcessHierarchy(child, currentDepth + 1, writer, processed, skipAttr);
+                ProcessHierarchy(child, currentDepth + 1, writer, processed, skipAttr, ref processedCount);
             }
 
             WriteIndentedLine(writer, currentDepth * 2, "END");
@@ -355,9 +457,25 @@ namespace AttFileDump
             int attrSize = maxNameLength + 3;
             StringBuilder sb = new StringBuilder(128);
 
-            foreach (ExportAttribute exportAttr in profile.Attributes)
+            foreach (ExportItem exportItem in profile.Attributes)
             {
-                WriteSingleAttribute(element, exportAttr.DbAttr, exportAttr.ExportName, iTab, attrSize, writer, sb);
+                string attrValue;
+    
+                try
+                {
+                    // Use the native method that Rider already verified works!
+                    attrValue = exportItem.IsExpression ? element.EvaluateString(exportItem.DbExpr) :
+                        // Standard attribute extraction
+                        element.GetAsString(exportItem.DbAttr);
+                }
+                catch 
+                { 
+                    // If the attribute is unset or the PML expression is invalid for this element, 
+                    // silently catch the error and move to the next attribute.
+                    continue; 
+                }
+
+                WriteFormattedAttribute(attrValue, exportItem.ExportName, iTab, attrSize, writer, sb);
             }
 
             if (injectBranchPseudos)
@@ -376,7 +494,11 @@ namespace AttFileDump
             string attrValue;
             try { attrValue = element.GetAsString(attr); }
             catch { return; }
+            WriteFormattedAttribute(attrValue, exportName, iTab, attrSize, writer, sb);
+        }
 
+        private void WriteFormattedAttribute(string attrValue, string exportName, int iTab, int attrSize, StreamWriter writer, StringBuilder sb)
+        {
             if (string.IsNullOrEmpty(attrValue)) return;
 
             if (ShouldExportAttribute(attrValue, _exportUnsets))
@@ -387,15 +509,22 @@ namespace AttFileDump
 
                 sb.Clear();
                 sb.Append(' ', iTab).Append(exportName).Append(Delimiter);
-                string leftPart = sb.ToString();
-                sb.Clear();
-                sb.Append(leftPart.PadRight(iTab + attrSize + Delimiter.Length + 2)).Append(attrValue);
+                
+                // MANUALLY calculate padding to avoid .PadRight() string allocation
+                int currentLength = sb.Length;
+                int targetLength = iTab + attrSize + Delimiter.Length + 2;
+                if (targetLength > currentLength)
+                {
+                    sb.Append(' ', targetLength - currentLength);
+                }
+                
+                sb.Append(attrValue);
 
-                string formattedLine = sb.ToString();
-                if (hasDollarUnderscore) formattedLine = formattedLine.Replace("DOLLARU", "$$_");
-                if (formattedLine.Contains("DOLLARL")) formattedLine = formattedLine.Replace("DOLLARL", "$$L");
+                // Perform replacements DIRECTLY in the StringBuilder to avoid intermediate string allocations
+                if (hasDollarUnderscore) sb.Replace("DOLLARU", "$$_");
+                sb.Replace("DOLLARL", "$$L");
 
-                writer.WriteLine(formattedLine);
+                writer.WriteLine(sb.ToString());
             }
         }
 
@@ -407,16 +536,50 @@ namespace AttFileDump
             bool hasXml = _xmlFilter != null;
             bool isInXml = hasXml && _xmlFilter.ContainsKey(type);
 
+            var combinedRules = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            
+            if (hasXml)
+            {
+                foreach (var kvp in _globalAttributes)
+                {
+                    combinedRules[kvp.Key] = kvp.Value;
+                }
+                
+                if (isInXml)
+                {
+                    foreach (var kvp in _xmlFilter[type])
+                    {
+                        combinedRules[kvp.Key] = kvp.Value; // Overwrite globals with element specific rules
+                    }
+                }
+            }
+            
+            bool hasCombinedRules = combinedRules.Count > 0;
+
             if (_strictXmlMode)
             {
                 // SCENARIO 3: Strict Mode (ONLY XML attributes)
-                if (isInXml)
+                if (hasCombinedRules)
                 {
                     profile.SuppressPseudos = true;
-                    foreach (var kvp in _xmlFilter[type])
+                    foreach (var kvp in combinedRules)
                     {
-                        DbAttribute explicitAttr = DbAttribute.GetDbAttribute(kvp.Key);
-                        if (explicitAttr != null) profile.Attributes.Add(new ExportAttribute(explicitAttr, kvp.Value));
+                        if (kvp.Key.StartsWith("EXP:"))
+                        {
+                            string exprStr = kvp.Key.Substring(4);
+                            try
+                            {
+                                DbExpression expr = DbExpression.Parse(exprStr);
+                                profile.Attributes.Add(new ExportItem(expr, kvp.Value));
+                            }
+                            catch (Exception ex){ Log.Warning($"Invalid PML Expression '{exprStr}': {ex.Message}"); }
+                        }
+                        else
+                        {
+                            DbAttribute explicitAttr = DbAttribute.GetDbAttribute(kvp.Key);
+                            if (explicitAttr != null && !_excludedAttributes.Contains(explicitAttr))
+                                profile.Attributes.Add(new ExportItem(explicitAttr, kvp.Value));
+                        }
                     }
                 }
             }
@@ -429,28 +592,43 @@ namespace AttFileDump
                 foreach (DbAttribute attr in rawAttrs)
                 {
                     if (attr.Type == DbAttributeType.STRINGARRAY) continue;
+                    if (_excludedAttributes.Contains(attr)) continue;
 
                     processedAttrs.Add(attr.Name);
 
-                    if (isInXml && _xmlFilter[type].TryGetValue(attr.Name, out string alias))
+                    if (hasCombinedRules && combinedRules.TryGetValue(attr.Name, out string alias))
                     {
-                        profile.Attributes.Add(new ExportAttribute(attr, alias));
+                        profile.Attributes.Add(new ExportItem(attr, alias));
                     }
                     else
                     {
-                        profile.Attributes.Add(new ExportAttribute(attr, attr.Name.ToUpper()));
+                        profile.Attributes.Add(new ExportItem(attr, attr.Name.ToUpper()));
                     }
                 }
 
                 // If admin added custom UDA keys in XML that weren't caught by the raw GetAttributes() array
-                if (isInXml)
+                if (hasCombinedRules)
                 {
-                    foreach (var kvp in _xmlFilter[type])
+                    foreach (var kvp in combinedRules)
                     {
-                        if (!processedAttrs.Contains(kvp.Key))
+                        if (kvp.Key.StartsWith("EXP:"))
                         {
-                            DbAttribute explicitAttr = DbAttribute.GetDbAttribute(kvp.Key);
-                            if (explicitAttr != null) profile.Attributes.Add(new ExportAttribute(explicitAttr, kvp.Value));
+                            string exprStr = kvp.Key.Substring(4);
+                            try
+                            {
+                                DbExpression expr = DbExpression.Parse(exprStr);
+                                profile.Attributes.Add(new ExportItem(expr, kvp.Value));
+                            }
+                            catch (Exception ex){ Log.Warning($"Invalid PML Expression '{exprStr}': {ex.Message}"); }
+                        }
+                        else
+                        {
+                            if (!processedAttrs.Contains(kvp.Key))
+                            {
+                                DbAttribute explicitAttr = DbAttribute.GetDbAttribute(kvp.Key);
+                                if (explicitAttr != null && !_excludedAttributes.Contains(explicitAttr))
+                                    profile.Attributes.Add(new ExportItem(explicitAttr, kvp.Value));
+                            }
                         }
                     }
                 }
