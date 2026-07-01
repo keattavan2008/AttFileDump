@@ -51,7 +51,7 @@ namespace AttFileDump
 
         // Caching structures
         private readonly Dictionary<DbElementType, TypeExportProfile> _attributeCache = new Dictionary<DbElementType, TypeExportProfile>();
-        private readonly LoggingLevelSwitch _levelSwitch = new LoggingLevelSwitch();
+        private LoggingLevelSwitch _levelSwitch = new LoggingLevelSwitch();
 
         private readonly struct ExportItem
         {
@@ -148,23 +148,146 @@ namespace AttFileDump
     <Type>SITE</Type>
     <Type>ZONE</Type>
     <Type>PIPE</Type>
-    <Type>EQUIPMENT</Type>
+    <Type>EQUI</Type>
+    <Type>STRU</Type>
+    <Type>BRAN</Type>
+    <Type>ATTA</Type>
+    <Type>BEND</Type>
+    <Type>BRCO</Type>
+    <Type>CAP</Type>
+    <Type>CLOS</Type>
+    <Type>COUP</Type>
+    <Type>CROS</Type>
+    <Type>DUCT</Type>
+    <Type>ELBO</Type>
+    <Type>FBLI</Type>
+    <Type>FILT</Type>
+    <Type>FLAN</Type>
+    <Type>FTUB</Type>
+    <Type>GASK</Type>
+    <Type>INST</Type>
+    <Type>LJSE</Type>
+    <Type>OLET</Type>
+    <Type>PCOM</Type>
+    <Type>REDU</Type>
+    <Type>SHU</Type>
+    <Type>STIF</Type>
+    <Type>TEE</Type>
+    <Type>TRAP</Type>
+    <Type>UNIO</Type>
+    <Type>VALV</Type>
+    <Type>VENT</Type>
+    <Type>VFWA</Type>
+    <Type>VTWA</Type>
+    <Type>WELD</Type>
+    <Type>ELCONN</Type>
+    <Type>NOZZ</Type>
+    <Type>PTRA</Type>
+    <Type>SUBE</Type>
+    <Type>FRMW</Type>
+    <Type>SBFR</Type>
+    <Type>FLOO</Type>
+    <Type>FITT</Type>
+    <Type>GWALL</Type>
+    <Type>SCTN</Type>
+    <Type>GENSEC</Type>
+    <Type>PANE</Type>
+    <Type>STWALL</Type>
+    <Type>WALL</Type>
+    <Type>TMPL</Type>
+    <Type>EXTR</Type>
+    <Type>BOX</Type>
+    <Type>CONE</Type>
+    <Type>RTOR</Type>
+    <Type>REVO</Type>
+    <Type>CYLI</Type>
+    <Type>SUBS</Type>
   </IncludedElements>
-  <IncludedAttributes>
-    <Attribute alias=""System Type"">STYPE</Attribute>
-    <Expression alias=""Name Length"">LENGTH(NAME)</Expression>
-  </IncludedAttributes>
+
   <ExcludedAttributes>
-    <Attribute>USERM</Attribute>
-    <Attribute>LASTM</Attribute>
+    <Attribute>UWMTXT</Attribute>
+    <Attribute>DSCO</Attribute>
+    <Attribute>PTSP</Attribute>
+    <Attribute>INSC</Attribute>
+    <Attribute>SKEY</Attribute>
+    <Attribute>STLR</Attribute>
+    <Attribute>ORRF</Attribute>
+    <Attribute>STMF</Attribute>
+    <Attribute>INVF</Attribute>
+    <Attribute>UUIDIA</Attribute>
+    <Attribute>PROPST</Attribute>
+    <Attribute>SPRE</Attribute>
+    <Attribute>FSTAT</Attribute>
+    <Attribute>MDSYSF</Attribute>
+    <Attribute>INPRTR</Attribute>
+    <Attribute>OUPRTR</Attribute>
+    <Attribute>FAREA</Attribute>     
+    <Attribute>FPLINE</Attribute>
+    <Attribute>FDRA</Attribute>
+    <Attribute>FREV</Attribute>
+    <Attribute>FRDR</Attribute>
+    <Attribute>FSTAT</Attribute>
+    <Attribute>PLANU</Attribute>
+    <Attribute>MODU</Attribute>  
+    <Attribute>RLSTOR</Attribute>
+    <Attribute>:NOOFSAVE</Attribute>
+    <Attribute>:REVDATA</Attribute>
+    <Attribute>:SCOPE</Attribute> 
+    <Attribute>:SDNFREVNO</Attribute>
+    <Attribute>:SDNFTRANO</Attribute>
+    <Attribute>:SDNFTRRVNO</Attribute>
+    <Attribute>:FABELIST</Attribute>
+    <Attribute>:FABMODNR</Attribute>
+    <Attribute>:FABTARGET</Attribute>
+    <Attribute>:FABSOURCE</Attribute>
+    <Attribute>:FABDECODE</Attribute>
+    <Attribute>:FABPRID</Attribute>
+    <Attribute>:FABSTID</Attribute>
+    <Attribute>:FABCLID</Attribute>
+    <Attribute>:FABEFID</Attribute>
+    <Attribute>:FABTRRVNO</Attribute>
+    <Attribute>:FABTRANO</Attribute>
+    <Attribute>:FABREVNO</Attribute>
+    <Attribute>:FABITIME</Attribute>
+    <Attribute>:FABIDATE</Attribute>
+    <Attribute>:FABETIME</Attribute>
+    <Attribute>:FABEDATE</Attribute>
+    <Attribute>:SDNFMODNR</Attribute>
+    <Attribute>:SDNFEDATE</Attribute>
+    <Attribute>:SDNFETIME</Attribute>
+    <Attribute>:SDNFIDATE</Attribute>
+    <Attribute>:SDNFITIME</Attribute>
+    <Attribute>:SDNFEFID</Attribute>
+    <Attribute>:SDNFCLID</Attribute> 
+    <Attribute>:SDNFSTID</Attribute> 
+    <Attribute>:SDNFPRID</Attribute> 
+    <Attribute>:SDNFDECODE</Attribute>
+    <Attribute>:SDNFSOURCE</Attribute>
+    <Attribute>:SDNFTARGET</Attribute>
+    <Attribute>:SDNFELIST</Attribute>
+    <Attribute>:MDSBARS</Attribute>  
+    <Attribute>:MDSCP1</Attribute>   
+    <Attribute>:MDSCP2</Attribute>   
+    <Attribute>:MDSCP3</Attribute>   
+    <Attribute>:MDSEDIT</Attribute>  
+    <Attribute>:MDSHANGGROUP</Attribute>
+    <Attribute>:MDSHANGROT</Attribute>
+    <Attribute>:MDSHV</Attribute>    
+    <Attribute>:MDSMAXBORE</Attribute>
+    <Attribute>:MDSMAXPIPES</Attribute>
+    <Attribute>:MDSMINBORE</Attribute>
+    <Attribute>:MDSRANGE</Attribute> 
+    <Attribute>:MDSAUTOFILE</Attribute>
   </ExcludedAttributes>
-  <Element type=""SITE"">
-    <Attribute alias=""Site Name"">NAME</Attribute>
-    <Expression alias=""Site Length"">LENGTH OF SITE</Expression>
-  </Element>
-  <Element type=""PIPE"">
-    <Attribute>NAME</Attribute>
-    <Attribute>BORE</Attribute>
+
+  <IncludedAttributes>
+    <Attribute alias=""Tube Length"">TULE</Attribute>
+    <Attribute alias=""Cut Length"">CLLE</Attribute>
+    <Expression alias=""Site Name"">NAME OF SITE</Expression>
+  </IncludedAttributes>
+
+  <Element type=""EQUI"">
+    <Expression alias=""Site Purpose"">Purpose OF SITE</Expression>
   </Element>
 </AttDumpConfig>";
             File.WriteAllText(samplePath, xmlContent);
