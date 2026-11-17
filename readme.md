@@ -12,34 +12,38 @@ By shifting the heavy lifting—such as database traversal, string manipulation,
 - **XML-Driven Filtering & Aliasing:** Control exactly what is exported for specific element types using an external XML file. Seamlessly rename attributes or override global configuration rules on the fly using the `alias` tag.
 - **Smart Regex File Naming:** Automatically sanitizes complex AVEVA names (like `/SITE-PIPING-AREA01`) into safe file names using customizable delimiters. Intelligently handles empty prefixes to ensure clean file names.
 - **Multi-File Output:** Automatically split massive database exports into individual text files per root element, or combine them into a single master file.
-- **Enterprise Logging & Debug Control:** Fully integrated with Serilog. Generates daily rolling logs, tracks execution times down to the millisecond, and features dynamic log-level toggling via PML commands (`SetLogLevel`) to keep your production runs clean.
+- **Enterprise Logging & Monitoring:** Uses the shared **AvevaAddins.Common** library, like every other AVEVA add-in: daily rolling log files, optional central Seq logging, and realtime status (progress per site, heartbeat, success/failure) in the AVEVA Status Monitor.
+- **Safe Output:** Every file is written as `.tmp` and renamed only when complete. If a site fails, its previous file is kept, the partial output stays in the `.tmp` file, and the other sites are still exported.
 
 ## 📋 Prerequisites
 
-- AVEVA E3D Design (x86 E3D - 2.1 & 3.1 | x64 - 4.2 / UE (Hybird v3.x, 4.x ,..) compile the DLL according to your E3D version)
-- `.NET SDK` targeting `.NET Framework 4.8` (or matching your E3D installation)
-- `Serilog.dll` and `Serilog.Sinks.File.dll` (Available in the default AVEVA UE installation directory, for older version of E3D download manually and place it with compiled AttFileDump.dll and invoke in DesignAddin.xml)
+- AVEVA E3D Design 3.1 (32-bit). The default Release build targets x86. For a 64-bit AVEVA product use the `Release|X64` configuration.
+- `.NET SDK` targeting `.NET Framework 4.8.1`
+- The shared library **AvevaAddins.Common** checked out next to this project (`..\AvevaAddins.Common`)
 
 ## 📦 Required Assemblies (Dependencies)
 
-To successfully compile and run this project, you must reference the following assemblies. These cannot be downloaded via NuGet (except Serilog) and must be copied from your local AVEVA E3D installation directory:
+**AVEVA Core Libraries** (copied from the E3D 3.1 installation; the project looks in `C:\Temp\E3D3.1\`, override with `/p:AvevaDllDir=...`):
+- `Aveva.ApplicationFramework.dll`, `Aveva.ApplicationFramework.Presentation.dll`
+- `Aveva.Core.Database.dll`, `Aveva.Core.Database.Filters.dll`, `Aveva.Core.Presentation.dll`
+- `PMLNet.dll`, `PMLNetUtilities.dll`
 
-**AVEVA Core Libraries:**
-- `Aveva.Core.Database.dll`
-- `Aveva.Core.Database.Filters.dll`
-- `PMLNet.dll`
-- `PMLNetUtilities.dll`
+**Shared library and its dependencies** (restored and copied to `bin\Release` by the build):
+- `AvevaAddins.Common.dll`
+- `Serilog.dll` (assembly 2.0.0.0, Serilog 2.10/2.11) and `Serilog.Sinks.File.dll` (5.0.0.0). E3D 3.1 does not ship Serilog.
+- Only when Seq is used: `Serilog.Sinks.Seq.dll`, `Serilog.Sinks.PeriodicBatching.dll`, `Serilog.Formatting.Compact.dll`
+- `Newtonsoft.Json.dll` 13 is shipped by E3D 3.1; do not overwrite E3D's copy.
 
-**Third-Party Libraries:**
-- `Serilog.dll` (v4.2.0 or compatible)
-- `Serilog.Sinks.File.dll`
-
-*Note: For the cleanest cross-platform compilation, place these files in a local `lib/` directory at the root of your project.*
+> Serilog 4.x is deliberately **not** used: it needs newer `System.Diagnostics.DiagnosticSource`,
+> `System.Threading.Channels` and `System.Memory` versions than E3D 3.1 ships.
 
 ## 🛠️ Installation
 
-1. Compile the `AttFileDump` project into a `.dll` using `dotnet build -c Release`.
-2. Place the resulting `.dll` (and ensure Serilog DLLs are present) in your AVEVA `%AVEVA_DESIGN_USER%` or standard macro executable directory.
+1. Build with restore (this also builds AvevaAddins.Common):
+   ```powershell
+   dotnet msbuild AttFileDump.csproj /restore /t:Build /p:Configuration=Release
+   ```
+2. Copy from `bin\Release` to the add-in folder: `AttFileDump.dll`, `AvevaAddins.Common.dll`, `Serilog.dll`, `Serilog.Sinks.File.dll`, and the three Seq DLLs if Seq is used. Remove any older `Serilog.dll` 4.x from that folder.
 3. Import the DLL into your E3D environment using PML: `import 'AttFileDump'`
 
 ## 🧩 Application Framework Registration (designAddins.xml)
@@ -58,6 +62,7 @@ The legacy E3D framework uses a straightforward Add-in registration. Since this 
 <?xml version="1.0" encoding="utf-8"?>
 <ArrayOfString xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <string>AttFileDump</string>
+  <string>AvevaAddins.Common</string>
   <string>Serilog</string>
   <string>Serilog.Sinks.File</string>
 </ArrayOfString>
@@ -72,16 +77,43 @@ The legacy E3D framework uses a straightforward Add-in registration. Since this 
 </ArrayOfString>
 ```
 
-## ⚙️ Logging & PML Integration
+## ⚙️ Logging, Seq & Status Hub
 
-Administrators can dynamically control the verbosity of the extraction logs at runtime using the `SetLogLevel(INTEGER)` method. This prevents disk I/O bottlenecks during massive production runs while allowing deep troubleshooting when verifying new configurations.
+Logging, Seq and the realtime status hub are configured the same way as in every other add-in
+(AvevaAdminToolkit uses the same element names). Put them directly under `<AttDumpConfig>` in the
+export XML; each add-in keeps its own XML file:
 
-| Integer Value | Serilog Log Level | Description / Use Case |
-| :--- | :--- | :--- |
-| **`0`** | `Debug` | High verbosity. Tracks tree-pruning, skipped branches, and granular internal events. |
-| **`1`** | `Information` | **Default.** Logs extraction start/stop metrics, configuration load rules, and basic telemetry. |
-| **`2`** | `Warning` | Logs syntax errors in custom PML expressions or unresolvable UDA/attribute definitions. |
-| **`3`** | `Error` | Low verbosity. Only logs critical process failures that halt execution. |
+```xml
+<AttDumpConfig>
+  <LogDirectory>C:\Temp\AVEVA\Logs</LogDirectory>      <!-- empty = the output directory -->
+  <LogLevel>Information</LogLevel>                       <!-- Verbose, Debug, Information, Warning, Error, Fatal -->
+  <SeqServerUrl>http://seq-server:5341</SeqServerUrl>    <!-- empty = Seq off -->
+  <StatusHub>
+    <Url>http://status-hub:5080/api/status</Url>         <!-- empty = hub off -->
+    <AccessToken>this server's publisher token</AccessToken>
+  </StatusHub>
+  ...
+</AttDumpConfig>
+```
+
+A wrong value never stops the export: an unknown log level falls back to Information, an unusable
+log folder falls back to the output folder (then `C:\temp`), and an empty or unreachable Seq or
+hub only writes a log line. If `AccessToken` is empty, the environment variable
+`ATTFILEDUMP_STATUSHUB_TOKEN` is used.
+
+PML can override each value (the PML value wins over the XML):
+
+| PML method | Overrides |
+| :--- | :--- |
+| `SetLogLevelName('Debug')` | `LogLevel` |
+| `SetLogLevel(INTEGER)` | `LogLevel`, kept for existing macros: 0 = Debug, 1 = Information, 2 = Warning, 3 = Error |
+| `SetLogDirectory('C:\Logs')` | `LogDirectory` |
+| `SetSeqServerUrl('')` | `SeqServerUrl` (empty switches Seq off) |
+| `SetStatusHubUrl(...)`, `SetStatusHubAccessToken(...)` | `StatusHub/Url`, `StatusHub/AccessToken` |
+
+In the AVEVA Status Monitor, each `ExecuteExtraction()` call is one run of source **AttFileDump**:
+one progress step per root element (site), the current site and element count, a heartbeat during
+long sites, and Completed or Failed at the end.
 
 ## 💻 Usage (PML Interface)
 
@@ -131,9 +163,8 @@ endhandle
   -- FALSE = Elements NOT in the XML dump ALL their default attributes.
   !exporter.SetStrictXmlMode(false)
 
-  -- 6.Serilog Configuration
-  -- optional, by default logging is set to 1
-  !exporter.SetLogLevel(2)
+  -- 6. Logging (optional; overrides LogLevel in the XML, default Information)
+  !exporter.SetLogLevelName('Warning')
 
   -- 7. Execute Extraction
   $P Starting high-speed attribute extraction...
@@ -141,14 +172,30 @@ endhandle
 
   -- Optional, to use before extraction on which method to use.
   -- 8. Generate Sample XML File
-  !exporter.GenerateSampleXml()
+  !exporter.GenerateSampleXml()                          $* writes C:\temp\sampleConfiguration.xml
+  !exporter.GenerateSampleXmlTo('C:\temp\E3D_Exports')   $* folder or .xml file name; created if missing
 
   handle any
     $P Extraction encountered an error: $!!error.text
   elsehandle none
-    $P Extraction completed successfully. Check the Serilog output for details.
+    $P Extraction completed successfully. Check the log for details.
   endhandle
 ```
+
+### What is exported, and what happens on errors
+
+- **Root elements:** `SetUseCe(true)` exports the current element and its members (or every site
+  when the CE is WORLD). `AddElementToExport(...)` exports each named element and its members. A
+  name inside another selected element gets no separate file (it is already in its owner's file).
+  A name that does not exist is logged and fails the run, after the other elements are exported.
+- **Files:** each file is written as `<name>.txt.tmp` and renamed to `<name>.txt` when complete.
+- **A failing site** is logged and the export continues with the next site. That site's previous
+  file is kept and its partial output stays in the `.tmp` file. At the end, `ExecuteExtraction()`
+  raises an error listing the failed sites, so the PML `handle` block sees it.
+- **Configuration problems** stop the run before any file is touched: an `SetXmlConfig` file that
+  does not exist or cannot be read, or an invalid skip attribute. Invalid entries inside the XML
+  (unknown element type or attribute) are skipped with a warning.
+- The output folder is created when it does not exist.
 
 ## ⚙️ XML Configuration Guide
 
@@ -191,16 +238,19 @@ The behavior of the XML filter is heavily optimized and controlled by `SetStrict
 
 ## 📝 Logging
 
-Logging is handled automatically by Serilog. Logs are generated in the same folder as your OutputDirectory with the naming convention `AttDumpLog_YYYYMMDD.txt`.
+Logs are written by the shared AvevaAddins.Common logger to `LogDirectory` (default: the output
+directory) as `<PROJECT>_AttFileDump_YYYYMMDD.log`, in the same line format as the other add-ins,
+and to Seq when `SeqServerUrl` is set. The logger no longer replaces Serilog's global `Log.Logger`,
+so it cannot interfere with other components in the E3D process.
 
 The log records:
 
-- Execution start/end times and total processing milliseconds.
+- Execution start/end times, total duration, files written, element count and failed sites.
 
-- Elements successfully exported and their destination file paths.
+- Each site exported, its destination file and element count.
 
 - Tree pruning events (available in Debug level to reduce disk I/O).
 
-- Non-fatal warnings for missing catalog data `(e.g., unable to resolve MTXX or SPRE)`.
+- Warnings for configuration entries that could not be resolved, and errors per failed site.
 
 ---

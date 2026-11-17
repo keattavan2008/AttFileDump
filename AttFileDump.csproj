@@ -12,14 +12,32 @@
         <AssemblyName>AttFileDump</AssemblyName>
         <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
         <FileAlignment>512</FileAlignment>
+        <!--
+          Folder with the AVEVA E3D DLLs referenced below (copied from the E3D 3.1 installation).
+          Override when building elsewhere: msbuild /p:AvevaDllDir=D:\AVEVA\E3D3.1\
+        -->
+        <AvevaDllDir Condition=" '$(AvevaDllDir)' == '' ">C:\Temp\E3D3.1\</AvevaDllDir>
     </PropertyGroup>
+    <!--
+      E3D 3.1 is a 32-bit process, so Debug and Release build for x86.
+      For a 64-bit AVEVA product use the Release|X64 configuration below.
+    -->
     <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-        <PlatformTarget>AnyCPU</PlatformTarget>
+        <PlatformTarget>x86</PlatformTarget>
         <DebugSymbols>true</DebugSymbols>
         <DebugType>full</DebugType>
         <Optimize>false</Optimize>
         <OutputPath>bin\Debug\</OutputPath>
         <DefineConstants>DEBUG;TRACE</DefineConstants>
+        <ErrorReport>prompt</ErrorReport>
+        <WarningLevel>4</WarningLevel>
+    </PropertyGroup>
+    <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+        <PlatformTarget>x86</PlatformTarget>
+        <DebugType>pdbonly</DebugType>
+        <Optimize>true</Optimize>
+        <OutputPath>bin\Release\</OutputPath>
+        <DefineConstants>TRACE</DefineConstants>
         <ErrorReport>prompt</ErrorReport>
         <WarningLevel>4</WarningLevel>
     </PropertyGroup>
@@ -34,39 +52,31 @@
     </PropertyGroup>
     <ItemGroup>
         <Reference Include="Aveva.ApplicationFramework">
-          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\3100.2504.1617.4807\Aveva.ApplicationFramework.dll</HintPath>
+          <HintPath>$(AvevaDllDir)Aveva.ApplicationFramework.dll</HintPath>
           <Private>False</Private>
         </Reference>
         <Reference Include="Aveva.ApplicationFramework.Presentation">
-          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\3100.2504.1617.4807\Aveva.ApplicationFramework.Presentation.dll</HintPath>
+          <HintPath>$(AvevaDllDir)Aveva.ApplicationFramework.Presentation.dll</HintPath>
           <Private>False</Private>
         </Reference>
         <Reference Include="Aveva.Core.Database">
-          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\3100.2504.1617.4807\Aveva.Core.Database.dll</HintPath>
+          <HintPath>$(AvevaDllDir)Aveva.Core.Database.dll</HintPath>
           <Private>False</Private>
         </Reference>
         <Reference Include="Aveva.Core.Database.Filters">
-          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\3100.2504.1617.4807\Aveva.Core.Database.Filters.dll</HintPath>
+          <HintPath>$(AvevaDllDir)Aveva.Core.Database.Filters.dll</HintPath>
           <Private>False</Private>
         </Reference>
         <Reference Include="Aveva.Core.Presentation">
-          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\3100.2504.1617.4807\Aveva.Core.Presentation.dll</HintPath>
+          <HintPath>$(AvevaDllDir)Aveva.Core.Presentation.dll</HintPath>
           <Private>False</Private>
         </Reference>
         <Reference Include="PMLNet">
-          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\3100.2504.1617.4807\PMLNet.dll</HintPath>
+          <HintPath>$(AvevaDllDir)PMLNet.dll</HintPath>
           <Private>False</Private>
         </Reference>
         <Reference Include="PMLNetUtilities">
-          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\3100.2504.1617.4807\PMLNetUtilities.dll</HintPath>
-          <Private>False</Private>
-        </Reference>
-        <Reference Include="Serilog">
-          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\4000.2512.416.5457\Serilog.dll</HintPath>
-          <Private>False</Private>
-        </Reference>
-        <Reference Include="Serilog.Sinks.File">
-          <HintPath>..\..\..\Public\Documents\AVEVA\Unpack\AVEVA.UnifiedEngineering\4000.2512.416.5457\Serilog.Sinks.File.dll</HintPath>
+          <HintPath>$(AvevaDllDir)PMLNetUtilities.dll</HintPath>
           <Private>False</Private>
         </Reference>
         <Reference Include="System"/>
@@ -80,8 +90,23 @@
         <Compile Include="AttDump.cs" />
         <Compile Include="Properties\AssemblyInfo.cs"/>
     </ItemGroup>
+    <!--
+      Logging (file + optional Seq) and realtime status (state file + status hub) come from the
+      shared library. Sibling repository: ..\AvevaAddins.Common. Build with restore:
+        dotnet msbuild AttFileDump.csproj /restore /t:Build /p:Configuration=Release
+      Deploy next to AttFileDump.dll: AvevaAddins.Common.dll, Serilog.dll, Serilog.Sinks.File.dll
+      (E3D 3.1 does not ship Serilog) and, only when Seq is used, Serilog.Sinks.Seq.dll,
+      Serilog.Sinks.PeriodicBatching.dll and Serilog.Formatting.Compact.dll.
+      Newtonsoft.Json 13 is shipped by E3D.
+    -->
+    <ItemGroup>
+        <ProjectReference Include="..\AvevaAddins.Common\AvevaAddins.Common\AvevaAddins.Common.csproj">
+            <Name>AvevaAddins.Common</Name>
+            <Private>True</Private>
+        </ProjectReference>
+    </ItemGroup>
     <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets"/>
-    <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
+    <!-- To modify your build process, add your task inside one of the targets below and uncomment it.
          Other similar extension points exist, see Microsoft.Common.targets.
     <Target Name="BeforeBuild">
     </Target>
