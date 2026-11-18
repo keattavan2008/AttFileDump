@@ -5,3 +5,5 @@ riderModule.iml
 /_ReSharper.Caches/
 # Reflection docs generated from the AVEVA DLLs (local reference only, never committed)
 MDfile*/
+# Local PML macros and sample configuration (not part of the build)
+PML/
