@@ -232,6 +232,8 @@ namespace AttFileDump
        Empty or missing values use the default; a wrong value never stops the export. -->
   <!-- Log folder; empty = the output directory. -->
   <LogDirectory></LogDirectory>
+  <!-- Run state files (crash detection); empty = C:\Temp\AVEVA\State, shared by all add-ins. -->
+  <StateDirectory>C:\Temp\AVEVA\State</StateDirectory>
   <!-- Verbose, Debug, Information, Warning, Error or Fatal. -->
   <LogLevel>Information</LogLevel>
   <!-- Optional Seq server, e.g. http://seq-server:5341; empty = Seq off. -->
@@ -455,9 +457,8 @@ namespace AttFileDump
 
         private void StartStatus(AddinCommonSettings settings)
         {
-            string stateDirectory = string.IsNullOrWhiteSpace(settings.StateDirectory)
-                ? Path.Combine(settings.LogDirectory, "State")
-                : settings.StateDirectory;
+            // XML StateDirectory, else the shared C:\Temp\AVEVA\State (never inside the log folder).
+            string stateDirectory = settings.EffectiveStateDirectory;
             try
             {
                 Status.ConfigureStateDirectory(stateDirectory);
