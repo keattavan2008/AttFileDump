@@ -79,22 +79,29 @@ The legacy E3D framework uses a straightforward Add-in registration. Since this 
 
 ## ⚙️ Logging, Seq & Status Hub
 
-Logging, Seq and the realtime status hub are configured the same way as in every other add-in
-(AvevaAdminToolkit uses the same element names). Put them directly under `<AttDumpConfig>` in the
-export XML; each add-in keeps its own XML file:
+Two files, both next to the DLLs in the add-in folder and found automatically:
+
+| File | Contains |
+| :--- | :--- |
+| `AvevaAddins.Common.config.xml` | Log, state, Seq and status hub settings, shared by all add-ins (Admin Toolkit, AttFileDump, CompoReport) |
+| `AttFileDump.config.xml` | The export rules below. `SetXmlConfig(path)` uses another file instead |
 
 ```xml
-<AttDumpConfig>
+<AvevaAddinsConfig>
   <LogDirectory>C:\Temp\AVEVA\Logs</LogDirectory>      <!-- empty = the output directory -->
+  <StateDirectory>C:\Temp\AVEVA\State</StateDirectory>  <!-- empty = C:\Temp\AVEVA\State -->
   <LogLevel>Information</LogLevel>                       <!-- Verbose, Debug, Information, Warning, Error, Fatal -->
   <SeqServerUrl>http://seq-server:5341</SeqServerUrl>    <!-- empty = Seq off -->
   <StatusHub>
     <Url>http://status-hub:5080/api/status</Url>         <!-- empty = hub off -->
     <AccessToken>this server's publisher token</AccessToken>
   </StatusHub>
-  ...
-</AttDumpConfig>
+</AvevaAddinsConfig>
 ```
+
+Any of these elements can also be put directly under `<AttDumpConfig>` to override it for
+AttFileDump only (older all-in-one XML files keep working that way). The log starts with the files
+used and the effective values.
 
 A wrong value never stops the export: an unknown log level falls back to Information, an unusable
 log folder falls back to the output folder (then `C:\temp`), and an empty or unreachable Seq or
@@ -156,8 +163,9 @@ endhandle
   !exporter.SetNameDelimiter('_')
   !exporter.SetSingleFileOutput(false) -- Generates one file per Site
 
-  -- 5. XML Configuration
-  !exporter.SetXmlConfig('C:\temp\E3D_Exports\ExportConfig.xml')
+  -- 5. XML Configuration: AttFileDump.config.xml next to AttFileDump.dll is used automatically.
+  --    Only for another file (without any file, everything is exported):
+  -- !exporter.SetXmlConfig('C:\temp\E3D_Exports\ExportConfig.xml')
 
   -- TRUE = High-Speed Bypass. Elements NOT in the XML are skipped.
   -- FALSE = Elements NOT in the XML dump ALL their default attributes.
@@ -172,7 +180,7 @@ endhandle
 
   -- Optional, to use before extraction on which method to use.
   -- 8. Generate Sample XML File
-  !exporter.GenerateSampleXml()                          $* writes C:\temp\sampleConfiguration.xml
+  !exporter.GenerateSampleXml()                          $* writes C:\temp\AttFileDump.config.xml (+ AvevaAddins.Common.config.xml if missing)
   !exporter.GenerateSampleXmlTo('C:\temp\E3D_Exports')   $* folder or .xml file name; created if missing
 
   handle any
@@ -192,8 +200,8 @@ endhandle
 - **A failing site** is logged and the export continues with the next site. That site's previous
   file is kept and its partial output stays in the `.tmp` file. At the end, `ExecuteExtraction()`
   raises an error listing the failed sites, so the PML `handle` block sees it.
-- **Configuration problems** stop the run before any file is touched: an `SetXmlConfig` file that
-  does not exist or cannot be read, or an invalid skip attribute. Invalid entries inside the XML
+- **Configuration problems** stop the run before any file is touched: a `SetXmlConfig` file that
+  does not exist, a configuration file that cannot be read, or an invalid skip attribute. Invalid entries inside the XML
   (unknown element type or attribute) are skipped with a warning.
 - The output folder is created when it does not exist.
 

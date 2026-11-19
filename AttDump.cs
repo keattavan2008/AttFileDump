@@ -26,7 +26,7 @@ namespace AttFileDump
         private const string AddinName = "AttFileDump";
         private const string StatusHubTokenEnvironmentVariable = "ATTFILEDUMP_STATUSHUB_TOKEN";
         private const string DefaultSampleDirectory = @"C:\temp";
-        private const string SampleFileName = "sampleConfiguration.xml";
+        private const string SampleFileName = "AttFileDump.config.xml";
         private const int ElementProgressInterval = 10000;
 
         /// <summary>Forwards to the logger of the running extraction (dropped between runs).</summary>
@@ -65,7 +65,8 @@ namespace AttFileDump
         private bool _singleFileOutput;
 
         // XML Configuration Parameters
-        private string _xmlConfigPath = "";
+        private string _xmlConfigPath = "";      // set from PML; empty = AttFileDump.config.xml next to the DLL
+        private string _resolvedConfigPath = ""; // file actually used by the current run (empty = none)
         private bool _strictXmlMode;
         private Dictionary<DbElementType, Dictionary<string, string>> _xmlFilter;
         private readonly HashSet<DbElementType> _includedElements = new HashSet<DbElementType>();
@@ -161,6 +162,10 @@ namespace AttFileDump
         [PMLNetCallable()] public void SetNameDelimiter(string delimiter) { _nameDelimiter = string.IsNullOrEmpty(delimiter) ? "_" : delimiter; }
         [PMLNetCallable()] public void SetSingleFileOutput(bool isSingle) { _singleFileOutput = isSingle; }
 
+        /// <summary>
+        /// Export configuration to use instead of AttFileDump.config.xml next to AttFileDump.dll.
+        /// Empty = that default file (and when it does not exist, everything is exported).
+        /// </summary>
         [PMLNetCallable()] public void SetXmlConfig(string xmlPath) { _xmlConfigPath = xmlPath; }
         [PMLNetCallable()] public void SetStrictXmlMode(bool strict) { _strictXmlMode = strict; }
         [PMLNetCallable()] public void SetSkipAttribute(string attributeName) { _skipAttributeName = attributeName; }
@@ -200,7 +205,10 @@ namespace AttFileDump
 
         #endregion
 
-        /// <summary>Writes the sample configuration to C:\temp\sampleConfiguration.xml.</summary>
+        /// <summary>
+        /// Writes C:\temp\AttFileDump.config.xml, and C:\temp\AvevaAddins.Common.config.xml when that
+        /// file does not exist yet.
+        /// </summary>
         [PMLNetCallable()]
         public void GenerateSampleXml()
         {
@@ -208,42 +216,23 @@ namespace AttFileDump
         }
 
         /// <summary>
-        /// Writes the sample configuration. The path can be a folder (sampleConfiguration.xml is
-        /// written in it) or an .xml file name; empty uses C:\temp. Missing folders are created.
+        /// Writes the sample configuration. The path can be a folder (AttFileDump.config.xml is
+        /// written in it) or an .xml file name; empty uses C:\temp. Missing folders are created. The
+        /// shared AvevaAddins.Common.config.xml is written to the same folder unless it already exists there.
         /// </summary>
         [PMLNetCallable()]
         public void GenerateSampleXmlTo(string path)
         {
-            string samplePath;
-            if (string.IsNullOrWhiteSpace(path))
-                samplePath = Path.Combine(DefaultSampleDirectory, SampleFileName);
-            else if (path.Trim().EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
-                samplePath = path.Trim();
-            else
-                samplePath = Path.Combine(path.Trim(), SampleFileName);
-
-            string directory = Path.GetDirectoryName(samplePath);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
+            string samplePath = AddinConfigFiles.GetSamplePath(path, DefaultSampleDirectory, SampleFileName);
 
             string xmlContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<!--
+  AttFileDump export configuration.
+  File: AttFileDump.config.xml next to AttFileDump.dll (found automatically; SetXmlConfig overrides).
+  Log, state, Seq and status hub settings are in AvevaAddins.Common.config.xml in the same folder.
+  To change one of them for this add-in only, add the element here, e.g. <LogLevel>Debug</LogLevel>.
+-->
 <AttDumpConfig>
-  <!-- Shared add-in settings: the same element names are used in every add-in's XML.
-       Empty or missing values use the default; a wrong value never stops the export. -->
-  <!-- Log folder; empty = the output directory. -->
-  <LogDirectory></LogDirectory>
-  <!-- Run state files (crash detection); empty = C:\Temp\AVEVA\State, shared by all add-ins. -->
-  <StateDirectory>C:\Temp\AVEVA\State</StateDirectory>
-  <!-- Verbose, Debug, Information, Warning, Error or Fatal. -->
-  <LogLevel>Information</LogLevel>
-  <!-- Optional Seq server, e.g. http://seq-server:5341; empty = Seq off. -->
-  <SeqServerUrl></SeqServerUrl>
-  <!-- Optional realtime status hub, e.g. http://status-hub:5080/api/status; empty Url = off. -->
-  <StatusHub>
-    <Url></Url>
-    <AccessToken></AccessToken>
-  </StatusHub>
-
   <IncludedElements>
     <Type>SITE</Type>
     <Type>ZONE</Type>
@@ -391,6 +380,7 @@ namespace AttFileDump
   </Element>
 </AttDumpConfig>";
             File.WriteAllText(samplePath, xmlContent);
+            AddinConfigFiles.WriteSharedSample(Path.GetDirectoryName(Path.GetFullPath(samplePath)));
         }
 
         // ------------------------------------------------------------------
@@ -398,12 +388,14 @@ namespace AttFileDump
         // ------------------------------------------------------------------
 
         /// <summary>
-        /// Shared settings: defaults, then the XML values, then the PML overrides. Never throws;
-        /// corrections (e.g. an unknown log level) are returned for logging.
+        /// Shared settings: defaults, then AvevaAddins.Common.config.xml, then this add-in's XML (only
+        /// the elements it contains), then the PML overrides. Never throws; corrections (e.g. an
+        /// unknown log level) are returned for logging.
         /// </summary>
-        private AddinCommonSettings BuildSettings(XDocument configDocument, List<string> notes)
+        private AddinCommonSettings BuildSettings(XDocument configDocument, List<string> notes, out string sharedFile)
         {
             var settings = new AddinCommonSettings { LogDirectory = _outputDirectory ?? string.Empty };
+            sharedFile = settings.ApplySharedFile(notes);
             if (configDocument != null)
                 settings.ReadFromLinq(configDocument.Root);
 
@@ -594,12 +586,12 @@ namespace AttFileDump
                     _xmlFilter[type] = atts;
                 }
                 Log.Info("Loaded XML Configuration from {ConfigPath}. Rules={Rules} Whitelist={Whitelist} Blacklist={Blacklist}",
-                    _xmlConfigPath, _xmlFilter.Count, _includedElements.Count, _excludedAttributes.Count);
+                    _resolvedConfigPath, _xmlFilter.Count, _includedElements.Count, _excludedAttributes.Count);
             }
             catch (Exception ex)
             {
                 // Exporting with half the rules would silently produce different files.
-                throw new InvalidDataException("Failed to load XML Configuration " + _xmlConfigPath + ": " + ex.Message, ex);
+                throw new InvalidDataException("Failed to load XML Configuration " + _resolvedConfigPath + ": " + ex.Message, ex);
             }
         }
 
@@ -619,33 +611,41 @@ namespace AttFileDump
             var watch = Stopwatch.StartNew();
             _projectCode = GetProjectCode();
 
-            // 1. Read the configuration file once (export rules + shared settings). Problems are
-            //    remembered and reported after logging has started.
+            // 1. Read the configuration file once (export rules + shared settings): SetXmlConfig, else
+            //    AttFileDump.config.xml next to the DLL. A file set from PML must exist; without the
+            //    default file everything is exported, as before. Problems are reported after logging starts.
+            bool explicitConfig = !string.IsNullOrWhiteSpace(_xmlConfigPath);
+            string configPath = AddinConfigFiles.Resolve(_xmlConfigPath, typeof(AttDump).Assembly);
+            _resolvedConfigPath = string.Empty;
             XDocument configDocument = null;
             Exception configError = null;
-            if (!string.IsNullOrWhiteSpace(_xmlConfigPath))
+            if (!File.Exists(configPath))
             {
-                if (!File.Exists(_xmlConfigPath))
-                    configError = new FileNotFoundException("Export configuration file not found: " + _xmlConfigPath, _xmlConfigPath);
-                else
+                if (explicitConfig)
+                    configError = new FileNotFoundException("Export configuration file not found: " + configPath, configPath);
+            }
+            else
+            {
+                _resolvedConfigPath = configPath;
+                try { configDocument = XDocument.Load(configPath); }
+                catch (Exception ex)
                 {
-                    try { configDocument = XDocument.Load(_xmlConfigPath); }
-                    catch (Exception ex)
-                    {
-                        configError = new InvalidDataException(
-                            "Export configuration file could not be read: " + _xmlConfigPath + " (" + ex.Message + ")", ex);
-                    }
+                    configError = new InvalidDataException(
+                        "Export configuration file could not be read: " + configPath + " (" + ex.Message + ")", ex);
                 }
             }
 
             // 2. Logging and status (never stop the export).
             var notes = new List<string>();
-            AddinCommonSettings settings = BuildSettings(configDocument, notes);
+            string sharedFile;
+            AddinCommonSettings settings = BuildSettings(configDocument, notes, out sharedFile);
             AddinLogger logger = StartLogging(_projectCode, settings, notes);
             Log.Target = logger;
             StartStatus(settings);
 
-            Log.Info("=== Extraction Started === Project={Project} MDB={Mdb}", _projectCode, GetMdbName());
+            Log.Info("=== Extraction Started === Project={Project} MDB={Mdb} Config={Config}", _projectCode, GetMdbName(),
+                _resolvedConfigPath.Length > 0 ? _resolvedConfigPath : "none (" + configPath + " not found; all elements and attributes)");
+            Log.Info("Shared settings: {SharedFile}; effective: {Settings}", sharedFile, settings.Describe());
             foreach (string note in notes)
                 Log.Warn("{SettingsWarning}", note);
 
@@ -918,7 +918,7 @@ namespace AttFileDump
                     { "SingleFile", _singleFileOutput },
                     { "StrictXml", _strictXmlMode },
                     { "OutputDirectory", _outputDirectory ?? string.Empty },
-                    { "ConfigFile", _xmlConfigPath ?? string.Empty },
+                    { "ConfigFile", _resolvedConfigPath ?? string.Empty },
                     { RunProgress.CompletedKey, 0 },
                     { RunProgress.TotalKey, roots },
                     { RunProgress.FailedKey, 0 },

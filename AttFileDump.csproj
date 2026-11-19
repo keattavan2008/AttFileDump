@@ -1,96 +1,96 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-    <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props"
-            Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')"/>
-    <PropertyGroup>
-        <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-        <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-        <ProjectGuid>{CD8F22FD-A616-4548-8E54-DD9824BB536E}</ProjectGuid>
-        <OutputType>Library</OutputType>
-        <AppDesignerFolder>Properties</AppDesignerFolder>
-        <RootNamespace>AttFileDump</RootNamespace>
-        <AssemblyName>AttFileDump</AssemblyName>
-        <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
-        <FileAlignment>512</FileAlignment>
-        <!--
+<Project ToolsVersion="4.0" DefaultTargets="Build"
+  xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')"/>
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{CD8F22FD-A616-4548-8E54-DD9824BB536E}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>AttFileDump</RootNamespace>
+    <AssemblyName>AttFileDump</AssemblyName>
+    <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <!--
           Folder with the AVEVA E3D DLLs referenced below (copied from the E3D 3.1 installation).
           Override when building elsewhere: msbuild /p:AvevaDllDir=D:\AVEVA\E3D3.1\
         -->
-        <AvevaDllDir Condition=" '$(AvevaDllDir)' == '' ">C:\Temp\E3D3.1\</AvevaDllDir>
-    </PropertyGroup>
-    <!--
+    <AvevaDllDir Condition=" '$(AvevaDllDir)' == '' ">C:\Temp\DLL\E3D3.1\</AvevaDllDir>
+  </PropertyGroup>
+  <!--
       E3D 3.1 is a 32-bit process, so Debug and Release build for x86.
       For a 64-bit AVEVA product use the Release|X64 configuration below.
     -->
-    <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-        <PlatformTarget>x86</PlatformTarget>
-        <DebugSymbols>true</DebugSymbols>
-        <DebugType>full</DebugType>
-        <Optimize>false</Optimize>
-        <OutputPath>bin\Debug\</OutputPath>
-        <DefineConstants>DEBUG;TRACE</DefineConstants>
-        <ErrorReport>prompt</ErrorReport>
-        <WarningLevel>4</WarningLevel>
-    </PropertyGroup>
-    <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-        <PlatformTarget>x86</PlatformTarget>
-        <DebugType>pdbonly</DebugType>
-        <Optimize>true</Optimize>
-        <OutputPath>bin\Release\</OutputPath>
-        <DefineConstants>TRACE</DefineConstants>
-        <ErrorReport>prompt</ErrorReport>
-        <WarningLevel>4</WarningLevel>
-    </PropertyGroup>
-    <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|X64' ">
-        <DebugType>pdbonly</DebugType>
-        <Optimize>true</Optimize>
-        <DefineConstants>TRACE</DefineConstants>
-        <ErrorReport>prompt</ErrorReport>
-        <WarningLevel>4</WarningLevel>
-      <OutputPath>bin\X64\Release\</OutputPath>
-      <PlatformTarget>X64</PlatformTarget>
-    </PropertyGroup>
-    <ItemGroup>
-        <Reference Include="Aveva.ApplicationFramework">
-          <HintPath>$(AvevaDllDir)Aveva.ApplicationFramework.dll</HintPath>
-          <Private>False</Private>
-        </Reference>
-        <Reference Include="Aveva.ApplicationFramework.Presentation">
-          <HintPath>$(AvevaDllDir)Aveva.ApplicationFramework.Presentation.dll</HintPath>
-          <Private>False</Private>
-        </Reference>
-        <Reference Include="Aveva.Core.Database">
-          <HintPath>$(AvevaDllDir)Aveva.Core.Database.dll</HintPath>
-          <Private>False</Private>
-        </Reference>
-        <Reference Include="Aveva.Core.Database.Filters">
-          <HintPath>$(AvevaDllDir)Aveva.Core.Database.Filters.dll</HintPath>
-          <Private>False</Private>
-        </Reference>
-        <Reference Include="Aveva.Core.Presentation">
-          <HintPath>$(AvevaDllDir)Aveva.Core.Presentation.dll</HintPath>
-          <Private>False</Private>
-        </Reference>
-        <Reference Include="PMLNet">
-          <HintPath>$(AvevaDllDir)PMLNet.dll</HintPath>
-          <Private>False</Private>
-        </Reference>
-        <Reference Include="PMLNetUtilities">
-          <HintPath>$(AvevaDllDir)PMLNetUtilities.dll</HintPath>
-          <Private>False</Private>
-        </Reference>
-        <Reference Include="System"/>
-        <Reference Include="System.Core"/>
-        <Reference Include="System.Data"/>
-        <Reference Include="System.Windows.Forms" />
-        <Reference Include="System.Xml"/>
-        <Reference Include="System.Xml.Linq" />
-    </ItemGroup>
-    <ItemGroup>
-        <Compile Include="AttDump.cs" />
-        <Compile Include="Properties\AssemblyInfo.cs"/>
-    </ItemGroup>
-    <!--
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <PlatformTarget>x86</PlatformTarget>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <PlatformTarget>x86</PlatformTarget>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|X64' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <OutputPath>bin\X64\Release\</OutputPath>
+    <PlatformTarget>X64</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Aveva.ApplicationFramework">
+      <HintPath>$(AvevaDllDir)Aveva.ApplicationFramework.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Aveva.ApplicationFramework.Presentation">
+      <HintPath>$(AvevaDllDir)Aveva.ApplicationFramework.Presentation.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Aveva.Core.Database">
+      <HintPath>$(AvevaDllDir)Aveva.Core.Database.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Aveva.Core.Database.Filters">
+      <HintPath>$(AvevaDllDir)Aveva.Core.Database.Filters.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Aveva.Core.Presentation">
+      <HintPath>$(AvevaDllDir)Aveva.Core.Presentation.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="PMLNet">
+      <HintPath>$(AvevaDllDir)PMLNet.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="PMLNetUtilities">
+      <HintPath>$(AvevaDllDir)PMLNetUtilities.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="System"/>
+    <Reference Include="System.Core"/>
+    <Reference Include="System.Data"/>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml"/>
+    <Reference Include="System.Xml.Linq" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="AttDump.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs"/>
+  </ItemGroup>
+  <!--
       Logging (file + optional Seq) and realtime status (state file + status hub) come from the
       shared library. Sibling repository: ..\AvevaAddins.Common. Build with restore:
         dotnet msbuild AttFileDump.csproj /restore /t:Build /p:Configuration=Release
@@ -99,14 +99,14 @@
       Serilog.Sinks.PeriodicBatching.dll and Serilog.Formatting.Compact.dll.
       Newtonsoft.Json 13 is shipped by E3D.
     -->
-    <ItemGroup>
-        <ProjectReference Include="..\AvevaAddins.Common\AvevaAddins.Common\AvevaAddins.Common.csproj">
-            <Name>AvevaAddins.Common</Name>
-            <Private>True</Private>
-        </ProjectReference>
-    </ItemGroup>
-    <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets"/>
-    <!-- To modify your build process, add your task inside one of the targets below and uncomment it.
+  <ItemGroup>
+    <ProjectReference Include="..\AvevaAddins.Common\AvevaAddins.Common\AvevaAddins.Common.csproj">
+      <Name>AvevaAddins.Common</Name>
+      <Private>True</Private>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets"/>
+  <!-- To modify your build process, add your task inside one of the targets below and uncomment it.
          Other similar extension points exist, see Microsoft.Common.targets.
     <Target Name="BeforeBuild">
     </Target>
